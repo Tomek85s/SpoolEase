@@ -1,0 +1,96 @@
+import { MyButton } from "framework/widgets.slint";
+import { Utils } from "utils.slint"; 
+import { AppState, AppConsts, AppBackend, SpoolStagingState, ControlState, SpoolScaleState, UiSpoolInfo } from "app.slint";
+
+export component SpoolStaging inherits Window {
+    utils := Utils { }
+
+    VerticalLayout {
+        spacing: AppConsts.trays-spacing;
+        title := Rectangle {
+            background: AppConsts.title-gradient;
+            height: 30px;
+            Text {
+                color: utils.contrasting_color(title.background);
+                text: "Staging";
+                font-size: 20px;
+            }
+
+            title-border := Rectangle {
+                border-color: black;
+                border-width: 1px;
+            }
+        }
+
+        filament-box := Rectangle {
+            background: (AppState.spool-staging-state == SpoolStagingState.Loaded) ? AppState.spool-staging-info.color : AppConsts.no-color;
+
+            if AppState.spool-staging-state == SpoolStagingState.Loaded: 
+            VerticalLayout {
+                property <bool> show-weight: AppState.spool-staging-info.weight-core > 0;
+                alignment: space-around;
+                padding-top: 12px;
+                padding-bottom: 8px;
+                material := Text {
+                    padding: 0px;
+                    horizontal-alignment: center;
+                    font-size: 20px;
+                    text: AppState.spool-staging-info.material;
+                    color: utils.contrasting_color(filament-box.background);
+                }
+
+                // K Value
+                k-value := Text {
+                    padding: 0px;
+                    horizontal-alignment: center;
+                    font-size: 20px;
+                    text: "K " + ((AppState.spool-staging-info.k != "") ? AppState.spool-staging-info.k : "N/A");
+                    color: utils.contrasting_color(filament-box.background);
+                }
+
+                // Spool Core Weight
+                if self.show-weight : core-weigth := 
+                Text {
+                    padding: 0px;
+                    horizontal-alignment: center;
+                    font-size: 20px;
+                    text:  (parent.show-weight ? "\{AppState.spool-staging-info.weight-core} g" : "");
+                    color: utils.contrasting_color(filament-box.background);
+                }
+            }
+
+            filament-box-border := Rectangle {
+                width: parent.width;
+                height: parent.height;
+                border-color: black;
+                border-width: 1px;
+            }
+        }
+    }
+
+    if (AppState.highlight-tray == 999 && AppState.highlight-tray-flash) || (AppState.highlight-staging && AppState.spool-staging-state == SpoolStagingState.Loaded) : highlight-border := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-width: 4px;
+        border-color: utils.contrasting_color(filament-box.background);
+    }
+
+    area := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => {
+            if AppState.spool-staging-state == SpoolStagingState.Loaded {
+                if AppState.control-state == ControlState.EncodeSelectSource {
+                    if AppState.spool-scale-state == SpoolScaleState.Loaded {
+                        AppState.tray_id_to_encode_after_setting_core_weight = 999;
+                        AppState.control-state = ControlState.EncodeSetSpoolCore
+                    } else {
+                        AppState.encode-start(999, 0, 0, "");
+                    }
+                } else {
+                    AppState.control-state = ControlState.StagingSelected;
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,133 @@
+import { ListView, GridBox, VerticalBox, HorizontalBox, Button, ComboBox, SpinBox, ScrollView } from "std-widgets.slint";
+
+import { FrameworkBackend, FrameworkState, OtaState, WebConfigState } from "framework/framework.slint";
+import { Terminal } from "framework/terminal.slint";
+import { Settings } from "framework/settings.slint";
+import { Selector, MyButton, Title, LeftTab } from "framework/widgets.slint";
+
+import { Utils } from "utils.slint";
+import { Trays } from "trays.slint";
+import { AppBackend, AppState, AppConsts, ControlState, SpoolStagingState, SpoolScaleState, UiTray, UiTrayState, UiFilamentState, UiSpoolInfo } from "app.slint";
+import { SpoolStaging } from "spoolstaging.slint";
+import { ControlPanel } from "controlpanel.slint";
+import { SelectPrinter } from "select-printer.slint";
+import { AppSettings } from "app-settings.slint";
+import { NumPad } from "numpad.slint";
+import { SpoolCoreWeight } from "core-weight.slint";
+
+// reexport to rust
+
+export { FrameworkState, FrameworkBackend }
+export { AppState, AppBackend } 
+
+export component AppWindow inherits Window {
+    width: 480px;
+    height: 320px;
+
+    property <int> current-page: (FrameworkState.web-config-state == WebConfigState.Started-AP || FrameworkState.web-config-state == WebConfigState.Started-STA) ? 2 : (AppState.control-state == ControlState.Booting || AppState.control-state == ControlState.ConnectingToPrinter || AppState.control-state == ControlState.BootFailed) ? 0 : 1;
+    property <int> current-page-x: 0;
+
+    if AppState.control-state != ControlState.EncodeSetSpoolCore: sgr := SwipeGestureHandler {
+        width: parent.width;
+        height: parent.height;
+        handle-swipe-up: current-page < 2 && (!AppState.select-printer);
+        handle-swipe-down: current-page > 0 && (!AppState.select-printer);
+        handle-swipe-left: AppState.select-printer == false;
+        handle-swipe-right: AppState.select-printer == true;
+        swiped => {
+            if FrameworkState.ota-state == OtaState.NotStarted {
+                if self.handle-swipe-down && self.current-position.y > self.pressed-position.y + (self.height / 8) {
+                    // swipe down 
+                    current-page -= 1;
+                } else if self.handle-swipe-up && self.current-position.y < self.pressed-position.y - (self.height / 8) {
+                    current-page += 1;
+                }
+                if self.handle-swipe-left && self.current-position.x < self.pressed-position.x - (self.width / 5) {
+                    AppState.select-printer = true;
+                    current-page_x = 1;
+                    current-page = current-page; // this looks strange, but to 'cut' the automatic state based vertical positioning tht scrolls on events which is confusing after manual touch
+                } else if self.handle-swipe-right && self.current-position.x > self.pressed-position.x + (self.width / 5) {
+                    AppState.select-printer = false;
+                    current-page_x = 0;
+                }
+            }
+        }
+        left-pages := VerticalLayout {
+            x: - current-page_x * 480px;
+            y: - current-page * 320px;
+            animate y {
+                duration: 1000ms;
+                easing: ease-in-out;
+            }
+            animate x {
+                duration: 1000ms;
+                easing: ease-in-out;
+            }
+
+            // Page 0 - Terminal
+            page0 := Terminal {
+                height: root.height;
+                width: root.width;
+                background: #16161e;
+            }
+
+            // Page 1 :  App Window
+            page1 := VerticalLayout {
+                height: parent.height;
+                width: parent.width;
+                alignment: stretch;
+                top := HorizontalLayout {
+                    spacing: AppConsts.trays-spacing;
+                    external := Trays {
+                        is_ams: false;
+                        title: "External"; //"\{AppState.highlight-box}";
+                        tray_numbers: [0];
+                        trays-state: AppState.trays-state;
+                    }
+
+                    // Separating the external tray from the ams trays so can scroll the ams trays in case of several ams's
+                if AppState.ams-exists.length > 0: 
+                  ams := Trays {
+                        is_ams: true;
+                        title: "AMS - " + (AppState.curr-ams-id + 1);
+                        include-paging-left: false;
+                        include-paging-right: false;
+                        tray_numbers: [
+                            AppState.curr-ams-id * 4 + 1,
+                            AppState.curr-ams-id * 4 + 2,
+                            AppState.curr-ams-id * 4 + 3,
+                            AppState.curr-ams-id * 4 + 4
+                        ];
+                        trays-state: AppState.trays-state;
+                    }
+                }
+
+                bottom := ControlPanel {
+                    staging-section-width: external.width;
+                    button-width: external.width;
+                }
+            }
+
+            page3 := AppSettings {
+                width: root.width;
+                height: root.height;
+                done => { // not used, but if we want to in the future
+                    root.current-page = 1;
+                }
+            }
+        }
+
+        SelectPrinter {
+            selected => {
+                AppState.select-printer = false;
+                current-page-x = 0;
+            }
+            x: left-pages.x + 480px;
+        }
+    }
+
+    if AppState.control-state == ControlState.EncodeSetSpoolCore: core-weight := 
+    SpoolCoreWeight {
+        height: root.height;
+    }
+}
