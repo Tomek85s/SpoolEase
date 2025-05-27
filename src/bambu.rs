@@ -1804,6 +1804,7 @@ pub async fn bambu_mqtt_task(
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct TagInformation {
+    pub tag_id: Option<String>,
     pub filament: Option<FilamentInfo>,
     pub calibrations: HashMap<String, Calibration>,
     pub calibrations_printer_name: String, // has value only if calibrations has any value
@@ -1901,6 +1902,7 @@ impl TagInformation {
         let mut filament_subtype = None;
         let mut color_name = None;
         let mut note = None;
+        let mut tag_id = None;
 
         if !(descriptor.starts_with(FILAMENT_URL_PREFIX)) {
             return Err(Error::ParseError);
@@ -1925,6 +1927,7 @@ impl TagInformation {
                     // Tag ID
                     "ID" => {
                         id = true;
+                        tag_id = Some(param_value.to_string());
                     }
                     // Material / Tray Type (material code in some other form)
                     "M" => {
@@ -2045,6 +2048,7 @@ impl TagInformation {
 
         if v && id && m && fi && c && nn && nx {
             Ok(Self {
+                tag_id,
                 filament: Some(filament_info_result),
                 calibrations: calibrations_result,
                 calibrations_printer_name: calibrations_printer_name.to_string(),

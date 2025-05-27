@@ -71,6 +71,7 @@ dependencies = [
  "semver",
  "sequential-storage",
  "serde",
+ "serde-csv-core",
  "serde_json",
  "sha2",
  "shared",
@@ -78,6 +79,7 @@ dependencies = [
  "slint",
  "slint-build",
  "smoltcp",
+ "snafu",
  "static_cell",
  "xtensa-lx-rt",
 ]
@@ -403,6 +405,15 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "atoi"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f28d99ec8bfea296261ca1af174f24225171fea9664ba9003cbebee704810528"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -1163,6 +1174,15 @@ dependencies = [
  "generic-array",
  "rand_core",
  "typenum",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d02f3b0da4c6504f86e9cd789d8dbafab48c2321be74e9987593de5a894d93d"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -3093,6 +3113,7 @@ dependencies = [
  "atomic-polyfill",
  "hash32 0.2.1",
  "rustc_version",
+ "serde",
  "spin",
  "stable_deref_trait",
 ]
@@ -3776,6 +3797,36 @@ name = "lebe"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
+
+[[package]]
+name = "lexical-parse-float"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683b3a5ebd0130b8fb52ba0bdc718cc56815b6a097e28ae5a6997d0ad17dc05f"
+dependencies = [
+ "lexical-parse-integer",
+ "lexical-util",
+ "static_assertions",
+]
+
+[[package]]
+name = "lexical-parse-integer"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d0994485ed0c312f6d965766754ea177d07f9c00c9b82a5ee62ed5b47945ee9"
+dependencies = [
+ "lexical-util",
+ "static_assertions",
+]
+
+[[package]]
+name = "lexical-util"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5255b9ff16ff898710eb9eb63cb39248ea8a5bb036bea8085b1a767ff6c4e3fc"
+dependencies = [
+ "static_assertions",
+]
 
 [[package]]
 name = "lhash"
@@ -5493,6 +5544,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-csv-core"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cfec1655ea3659845adacd59bcc16a471a365854ddb53220353a5faa4429e83"
+dependencies = [
+ "atoi",
+ "csv-core",
+ "heapless 0.7.17",
+ "itoa",
+ "lexical-parse-float",
+ "ryu",
+ "serde",
+]
+
+[[package]]
 name = "serde-json-core"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5752,7 +5818,7 @@ name = "snafu-derive"
 version = "0.8.5"
 source = "git+https://github.com/shepmaster/snafu?rev=aedc9db8c04a437b4c547efd4d73e9337fa43a4a#aedc9db8c04a437b4c547efd4d73e9337fa43a4a"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.101",

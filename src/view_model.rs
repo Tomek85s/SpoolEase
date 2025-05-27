@@ -25,6 +25,7 @@ use crate::app_config::{BASE_FILAMENTS, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
 use crate::color_utils::get_color_name;
 use crate::spool_scale::{self, SpoolScaleObserver};
 use crate::ssdp::{ssdp_task, SSDPPubSubChannel};
+use crate::store::{Store, StoreOp};
 use crate::web_app::EncodeInfoDTO;
 use crate::{
     app_config::AppConfig,
@@ -55,6 +56,7 @@ pub struct ViewModel {
     cores_list_vec_rc: slint::ModelRc<crate::app::SelectorOption>,
     spools_cores_weights: HashMap<i32, i32>,
     spools_cores_filter: String,
+    store: Rc<RefCell<Store>>,
 }
 
 impl ViewModel {
@@ -87,6 +89,9 @@ impl ViewModel {
         let ssdp_pub_sub = mk_static!(SSDPPubSubChannel, SSDPPubSubChannel::new());
         spawner.spawn(ssdp_task(stack, ssdp_pub_sub)).ok();
 
+        // Initialize store 
+        let store = Store::new(framework.clone());
+
         // Initialize spool_scale_model
         let spool_scale_model = crate::spool_scale::init(framework.clone(), app_config.clone(), stack, spawner, ssdp_pub_sub);
 
@@ -113,6 +118,7 @@ impl ViewModel {
             cores_list_vec_rc: selector_options_vec_rc,
             spools_cores_weights,
             spools_cores_filter: String::new(),
+            store,
         };
         let view_model_rc = Rc::new(RefCell::new(view_model));
 
@@ -1014,6 +1020,11 @@ impl SpoolTagObserver for ViewModel {
                 let tray_id = tray_id as i32;
 
                 if let Ok(tag_info) = TagInformation::from_descriptor(encoded_descriptor) {
+                    let tag_info_clone = if self.store.borrow().is_available() {
+                        Some(tag_info.clone())
+                    } else {
+                        None
+                    };
                     if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info(&tag_info) {
                         self.filament_staging.borrow_mut().tag_info = Some(tag_info);
                         ui.unwrap().global::<crate::app::AppState>().invoke_update_spool_staging(ui_spool_info);
@@ -1023,10 +1034,20 @@ impl SpoolTagObserver for ViewModel {
                             .global::<crate::app::AppState>()
                             .invoke_encoding_failed(SharedString::from("Descriptor Generation Error"));
                     }
+                    if let Some(tag_info) = tag_info_clone {
+                        if let Err(err) = self.store.borrow().try_send_op(StoreOp::WriteTag(tag_info)) {
+                            info!("Error writing tag to store : {}", err);
+                        }
+                    }
                 }
             }
             Status::ReadSuccess(read_text) => {
                 if let Ok(tag_info) = TagInformation::from_descriptor(read_text) {
+                    let tag_info_clone = if self.store.borrow().is_available() {
+                        Some(tag_info.clone())
+                    } else {
+                        None
+                    };
                     if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info(&tag_info) {
                         self.filament_staging.borrow_mut().tag_info = Some(tag_info);
                         ui.unwrap().global::<crate::app::AppState>().invoke_read_tag_succeeded(ui_spool_info);
@@ -1034,6 +1055,11 @@ impl SpoolTagObserver for ViewModel {
                         ui.unwrap()
                             .global::<crate::app::AppState>()
                             .invoke_read_tag_failed(SharedString::from("Invalid Tag Content"));
+                    }
+                    if let Some(tag_info) = tag_info_clone {
+                        if let Err(err) = self.store.borrow().try_send_op(StoreOp::WriteTag(tag_info)) {
+                            info!("Error writing tag to store : {}", err);
+                        }
                     }
                 }
             }

@@ -127,9 +127,11 @@ static_cell = { version = "2.1", features = ["nightly"] }
 once_cell = { version = "1.20.2", default-features = false, features = ["alloc"] }
 deku = { version = "0.17.0", default-features = false, features = ["alloc"] }
 anyhow = { version = "1.0.91", default-features = false }
+snafu = { git = "https://github.com/shepmaster/snafu", rev = "aedc9db8c04a437b4c547efd4d73e9337fa43a4a", default-features = false, features = ["rust_1_81", "alloc"]} # , "backtraces-impl-backtrace-crate"]} 
 hashbrown = { version = "0.15.0", features = ["serde"] }
 serde = { version = "1.0.213", default-features = false, features = [ "derive", "alloc", ] }
 serde_json = { version = "1.0.132", default-features = false, features = [ "alloc", ] }
+serde-csv-core = "0.3.2"
 pasetors = { version = "0.7.0", default-features = false, features = ["v4"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 getrandom = { version = "0.2.15", features = ["custom"] }

@@ -20,6 +20,8 @@ mod spool_scale;
 mod ssdp;
 mod view_model;
 mod web_app;
+mod store;
+mod csvdb;
 
 use alloc::{format, rc::Rc, string::ToString};
 use core::{cell::RefCell, net::Ipv4Addr};
