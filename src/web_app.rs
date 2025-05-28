@@ -24,12 +24,14 @@ use framework::{
 };
 
 use crate::app_config::{AppConfig, DefaultPrinterConfig, PrinterConfig, PrintersConfig, ScaleConfig, SPOOLS_CATALOG};
+use crate::store::Store;
 use crate::view_model::ViewModel;
 
 pub struct NestedAppBuilder {
     pub framework: Rc<RefCell<Framework>>,
     pub app_config: Rc<RefCell<AppConfig>>,
     pub view_model: Rc<RefCell<ViewModel>>,
+    pub store: Rc<Store>,
 }
 
 impl NestedAppWithWebAppStateBuilder for NestedAppBuilder {
@@ -234,6 +236,12 @@ impl AppWithStateBuilder for NestedAppBuilder {
                     encode_info.encrypt(&key.borrow())
                 })
             }),
+        );
+
+        let store_get = self.store.clone();
+        let router = router.route(
+            "/api/spools",
+            get(move |State(Encryption(key)): State<Encryption>| ready(store_get.query_spools().unwrap())),
         );
 
         router

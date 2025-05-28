@@ -40,11 +40,27 @@ pub trait CsvDbId {
 #[derive(Debug)]
 pub struct CsvRecordInfo<T>
 where
-    T: PartialEq + core::fmt::Debug,
+    T: CsvDbId + Serialize + DeserializeOwned + PartialEq + core::fmt::Debug,
 {
     pub data: T,
     pub length: usize, // including EOL (\n at this time, so +1)
     offset: u32,
+}
+
+impl <T> CsvRecordInfo<T> 
+where
+    T: CsvDbId + Serialize + DeserializeOwned + PartialEq + core::fmt::Debug,
+{
+    pub fn to_csv_string(&self) -> Result<String, CsvDbError> {
+        let mut writer = serde_csv_core::Writer::new();
+        let mut buffer = alloc::vec![0; self.length];
+        let length_written = writer.serialize(&self.data, buffer.as_mut_slice()).context(SerializeSnafu)?;
+        buffer.truncate(length_written);
+        // TODO: add this error as a source to the SerializeSnafu (so one error from several underlying sources)
+        // Not critical since data will always be utf8
+        let buffer_str = String::from_utf8(buffer).unwrap();
+        Ok(buffer_str)
+    }
 }
 
 #[derive(Serialize, Deserialize)]

@@ -3,7 +3,10 @@ use once_cell::unsync::OnceCell;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 
-use alloc::{rc::Rc, string::String};
+use alloc::{
+    rc::Rc,
+    string::{String, ToString},
+};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel};
 use framework::{
     error, info, mk_static,
@@ -14,7 +17,7 @@ use framework::{
 
 use crate::{
     bambu::{FilamentInfo, TagInformation},
-    csvdb::{CsvDb, CsvDbId},
+    csvdb::{CsvDb, CsvDbError, CsvDbId},
 };
 
 #[derive(Snafu, Debug)]
@@ -64,6 +67,28 @@ impl Store {
     pub fn is_available(&self) -> bool {
         true
     }
+
+    pub fn query_spools(&self) -> Option<String> {
+        if let Some(spools_db) = self.spools_db.get() {
+            let spool_records = spools_db.records.borrow();
+            let total_length = spool_records.values().map(|v| v.length).sum::<usize>();
+            let results : Result<String, CsvDbError> = spool_records.values().try_fold(String::with_capacity(total_length), |mut acc, v| {
+                let csv = v.to_csv_string();
+                if let Err(e) = &csv {
+                    error!("Error serializing to csv: {v:?} : {e}");
+                }
+                acc.push_str(&csv?);
+                Ok(acc)
+            });
+            // TODO: make it an error up as well, to handle in the caller
+            match results {
+                Ok(s) => Some(s),
+                Err(_) => None
+            }
+        } else {
+            None
+        }
+    }
 }
 
 #[embassy_executor::task] // up to two printers in parallel
@@ -72,7 +97,11 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
         let file_store = framework.borrow().file_store();
         match CsvDb::<SpoolRecord, _, FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES>::new(file_store.clone(), "/store/spools", 128, 200).await {
             Ok(db) => {
-                store.spools_db.set(db).map_err(|_e| "Fatal Internal Error: Can't assign spools_db to once_cell?").unwrap();
+                store
+                    .spools_db
+                    .set(db)
+                    .map_err(|_e| "Fatal Internal Error: Can't assign spools_db to once_cell?")
+                    .unwrap();
                 info!("Opened spools database");
             }
             Err(e) => {
@@ -123,7 +152,7 @@ struct SpoolRecord {
     pub color_code: String,       // 8
     pub note: String,             // 40
     pub brand: String,            // 30
-    pub weight_left: Option<i32>,         // 4
+    pub weight_left: Option<i32>, // 4
 }
 
 impl CsvDbId for SpoolRecord {

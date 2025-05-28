@@ -56,7 +56,7 @@ pub struct ViewModel {
     cores_list_vec_rc: slint::ModelRc<crate::app::SelectorOption>,
     spools_cores_weights: HashMap<i32, i32>,
     spools_cores_filter: String,
-    store: Rc<Store>,
+    pub store: Rc<Store>,
 }
 
 impl ViewModel {

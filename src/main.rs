@@ -405,6 +405,7 @@ async fn main(spawner: Spawner) {
             framework: framework.clone(),
             app_config: app_config.clone(),
             view_model: view_model.clone(),
+            store: view_model.borrow().store.clone(),
         },
     };
 
