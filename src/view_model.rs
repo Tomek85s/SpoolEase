@@ -23,7 +23,7 @@ use framework::{
 
 use crate::app_config::{BASE_FILAMENTS, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
 use crate::color_utils::get_color_name;
-use crate::spool_scale::{self, SpoolScaleObserver};
+use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
 use crate::ssdp::{ssdp_task, SSDPPubSubChannel};
 use crate::store::{Store, StoreOp};
 use crate::web_app::EncodeInfoDTO;
@@ -89,7 +89,7 @@ impl ViewModel {
         let ssdp_pub_sub = mk_static!(SSDPPubSubChannel, SSDPPubSubChannel::new());
         spawner.spawn(ssdp_task(stack, ssdp_pub_sub)).ok();
 
-        // Initialize store 
+        // Initialize store
         let store = Store::new(framework.clone());
 
         // Initialize spool_scale_model
@@ -337,7 +337,14 @@ impl ViewModel {
                 // First stored UI for this printer for when we switch back to it
                 Self::perform_select_printer(moved_ui.clone(), moved_view_model.clone(), &selected_printer);
             });
-            self.framework.borrow().spawner.spawn(printers_scheduled_store_state_task(self.framework.clone(), self.view_model.clone().unwrap())).ok();
+            self.framework
+                .borrow()
+                .spawner
+                .spawn(printers_scheduled_store_state_task(
+                    self.framework.clone(),
+                    self.view_model.clone().unwrap(),
+                ))
+                .ok();
         }
 
         // Initialize SpoolScale and weight related stuff
@@ -1020,11 +1027,7 @@ impl SpoolTagObserver for ViewModel {
                 let tray_id = tray_id as i32;
 
                 if let Ok(tag_info) = TagInformation::from_descriptor(encoded_descriptor) {
-                    let tag_info_clone = if self.store.is_available() {
-                        Some(tag_info.clone())
-                    } else {
-                        None
-                    };
+                    let tag_info_clone = if self.store.is_available() { Some(tag_info.clone()) } else { None };
                     if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info(&tag_info) {
                         self.filament_staging.borrow_mut().tag_info = Some(tag_info);
                         ui.unwrap().global::<crate::app::AppState>().invoke_update_spool_staging(ui_spool_info);
@@ -1035,7 +1038,7 @@ impl SpoolTagObserver for ViewModel {
                             .invoke_encoding_failed(SharedString::from("Descriptor Generation Error"));
                     }
                     if let Some(tag_info) = tag_info_clone {
-                        if let Err(err) = self.store.try_send_op(StoreOp::WriteTag(tag_info)) {
+                        if let Err(err) = self.store.try_send_op(StoreOp::WriteTag { tag_info, weight: None }) {
                             info!("Error writing tag to store : {}", err);
                         }
                     }
@@ -1043,11 +1046,7 @@ impl SpoolTagObserver for ViewModel {
             }
             Status::ReadSuccess(read_text) => {
                 if let Ok(tag_info) = TagInformation::from_descriptor(read_text) {
-                    let tag_info_clone = if self.store.is_available() {
-                        Some(tag_info.clone())
-                    } else {
-                        None
-                    };
+                    let tag_info_clone = if self.store.is_available() { Some(tag_info.clone()) } else { None };
                     if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info(&tag_info) {
                         self.filament_staging.borrow_mut().tag_info = Some(tag_info);
                         ui.unwrap().global::<crate::app::AppState>().invoke_read_tag_succeeded(ui_spool_info);
@@ -1057,7 +1056,7 @@ impl SpoolTagObserver for ViewModel {
                             .invoke_read_tag_failed(SharedString::from("Invalid Tag Content"));
                     }
                     if let Some(tag_info) = tag_info_clone {
-                        if let Err(err) = self.store.try_send_op(StoreOp::WriteTag(tag_info)) {
+                        if let Err(err) = self.store.try_send_op(StoreOp::WriteTag { tag_info, weight: None }) {
                             info!("Error writing tag to store : {}", err);
                         }
                     }
@@ -1295,6 +1294,26 @@ impl SpoolScaleObserver for ViewModel {
             term_info!("[S] Warning: Scale failed to initialize the NFC module");
         }
     }
+
+    fn on_button_pressed(&mut self, scale_weight: ScaleWeight) {
+        if let Some(tag_info) = &self.filament_staging.borrow().tag_info {
+            if let ScaleWeight::Stable(weight) = scale_weight {
+                if let Err(err) = self.store.try_send_op(StoreOp::WriteTag {
+                    tag_info: tag_info.clone(),
+                    weight: Some(weight),
+                }) {
+                    info!("Error writing tag to store : {}", err);
+                    // TODO: notify on GUI and on Scale Led
+                }
+            } else {
+                info!("Reqeust to store tag with weight but scale weight is not stable");
+                // TODO: notify on GUI and on Scale Led
+            }
+        } else {
+            info!("Reqeust to store tag with weight but no tag information in staging");
+            // TODO:  notify on GUI and on Scale Led
+        }
+    }
 }
 
 fn get_brand_from_text(text: &str) -> Option<&'static str> {
@@ -1318,7 +1337,7 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
     {
         let file_store = framework.borrow().file_store();
         let file_store = file_store.lock().await;
-        if !file_store.card_installed { 
+        if !file_store.card_installed {
             term_info!("SDCard not installed, won't restore state on restart");
             return;
         }

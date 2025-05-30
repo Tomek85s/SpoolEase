@@ -79,7 +79,6 @@ futures = { version = "0.3.31", features = ["alloc"], default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 
 # Storage crates
-embedded-sdmmc = { version = "0.8.0" }
 sequential-storage = { git = "https://github.com/tweedegolf/sequential-storage", features = [ "alloc", ], rev = "b6f7da77b7f3d66bc1ac36992a6a7b399b5ba030" }
 
 # Display & Touch crates

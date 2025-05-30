@@ -30,6 +30,7 @@ use crate::{app_config::AppConfig, ssdp::SSDPPubSubChannel};
 pub type ConsoleToScaleChannel = Channel<NoopRawMutex, ConsoleToScale, 5>;
 
 #[allow(dead_code)]
+#[derive(Clone, Copy)]
 pub enum ScaleWeight {
     Unknown,
     Stable(i32),
@@ -56,6 +57,7 @@ pub trait SpoolScaleObserver {
     fn on_term_text(&mut self, text: &str);
     fn on_tag_status(&mut self, status: &shared::spool_tag::Status);
     fn on_pn532_status(&mut self, status: bool);
+    fn on_button_pressed(&mut self, scale_weight: ScaleWeight);
 }
 
 impl SpoolScale {
@@ -100,6 +102,9 @@ impl SpoolScale {
                 }
                 ScaleToConsole::PN532Status(status) => {
                     self.notify_pn532_status(status);
+                }
+                ScaleToConsole::ButtonPressed => {
+                    self.notify_button_pressed();
                 }
             }
         }
@@ -179,6 +184,12 @@ impl SpoolScale {
         for weak_observer in self.observers.iter() {
             let observer = weak_observer.upgrade().unwrap();
             observer.borrow_mut().on_pn532_status(status);
+        }
+    }
+    pub fn notify_button_pressed(&mut self) {
+        for weak_observer in self.observers.iter() {
+            let observer = weak_observer.upgrade().unwrap();
+            observer.borrow_mut().on_button_pressed(self.weight);
         }
     }
 }

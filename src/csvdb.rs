@@ -20,14 +20,18 @@ pub enum CsvDbError {
         source: SDCardStoreErrorSource,
     },
 
+    #[snafu(display("Failed to parse database metadata : {source}"))]
     Metadata {
         source: ParseIntError,
     },
 
+    #[snafu(display("Failed to deserialize record \"{record}\" : {source}"))]
     Deserialize {
+        record: String,
         source: serde_csv_core::de::Error,
     },
 
+    #[snafu(display("Failed to serialize record: {source}"))]
     Serialize {
         source: serde_csv_core::ser::Error
     },
@@ -119,12 +123,13 @@ where
             }
             // Now read db file
             let db_bytes = sdcard.read_create_bytes(&db_file_name).await.context(StoreSnafu)?;
+            info!("Loading {db_file_name} database, file size: {}",db_bytes.len());
             let mut reader = serde_csv_core::Reader::<100>::new(); // 100 is max field size
             let mut nread = 0;
             while nread < db_bytes.len() {
                 let db_record = &db_bytes[nread..nread + record_width];
                 if !Self::is_empty_record(db_record) {
-                    let (record, record_length) = reader.deserialize::<T>(db_record).context(DeserializeSnafu)?;
+                    let (record, record_length) = reader.deserialize::<T>(db_record).context(DeserializeSnafu {record: String::from_utf8_lossy(db_record)})?;
                     let record_info = CsvRecordInfo {
                         data: record,
                         offset: nread as u32,
@@ -148,10 +153,10 @@ where
         })
     }
 
-    pub async fn insert(&self, record: T) -> Result<(), CsvDbError> {
+    pub async fn insert(&self, record: T) -> Result<bool, CsvDbError> {
         let (already_exist, offset) = if let Some(v) = self.records.borrow().get(record.id()) {
             if v.data == record {
-                return Ok(());
+                return Ok(false);
             }
             (true, v.offset)
         } else {
@@ -180,7 +185,7 @@ where
             self.records.borrow_mut().insert(csv_record_info.data.id().clone(), csv_record_info);
         }
 
-        Ok(())
+        Ok(true)
     }
 
     #[allow(dead_code)]

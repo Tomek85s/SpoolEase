@@ -241,7 +241,17 @@ impl AppWithStateBuilder for NestedAppBuilder {
         let store_get = self.store.clone();
         let router = router.route(
             "/api/spools",
-            get(move |State(Encryption(key)): State<Encryption>| ready(store_get.query_spools().unwrap())),
+            get(move |State(Encryption(key)): State<Encryption>| 
+                ready({
+                    match store_get.query_spools() {
+                        Some(csv) => csv,
+                        None =>  {
+                            error!("Failed to generate response to spoole query");
+                            "".to_string()
+                        }
+                    }
+                })
+            )
         );
 
         let router = router.route(

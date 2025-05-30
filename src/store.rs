@@ -6,7 +6,7 @@ use snafu::prelude::*;
 use alloc::{rc::Rc, string::String};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel};
 use framework::{
-    error, info, mk_static,
+    debug, error, info, mk_static,
     prelude::Framework,
     settings::{FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES},
     warn,
@@ -25,7 +25,7 @@ pub enum StoreError {
 
 #[derive(Debug)]
 pub enum StoreOp {
-    WriteTag(TagInformation),
+    WriteTag { tag_info: TagInformation, weight: Option<i32> },
 }
 
 type StoreRequestsChannel = Channel<NoopRawMutex, StoreOp, 5>;
@@ -91,6 +91,7 @@ impl Store {
 #[embassy_executor::task] // up to two printers in parallel
 pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
     {
+        debug!("Strted store_task");
         let file_store = framework.borrow().file_store();
         match CsvDb::<SpoolRecord, _, FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES>::new(file_store.clone(), "/store/spools", 128, 200).await {
             Ok(db) => {
@@ -110,23 +111,31 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
     let receiver = store.requests_channel.receiver();
     loop {
         match receiver.receive().await {
-            StoreOp::WriteTag(tag) => {
-                if tag.tag_id.is_some() {
-                    let filament_info = tag.filament.unwrap_or(FilamentInfo::new());
-                    let spool_rec = SpoolRecord {
-                        tag_id: tag.tag_id.unwrap(),
+            StoreOp::WriteTag { tag_info, weight } => {
+                if tag_info.tag_id.is_some() {
+                    let filament_info = tag_info.filament.unwrap_or(FilamentInfo::new());
+                    let mut spool_rec = SpoolRecord {
+                        tag_id: tag_info.tag_id.unwrap(),
                         material_type: filament_info.tray_type,
-                        material_subtype: tag.filament_subtype.unwrap_or_default(),
-                        color_name: tag.color_name.unwrap_or_default(),
+                        material_subtype: tag_info.filament_subtype.unwrap_or_default(),
+                        color_name: tag_info.color_name.unwrap_or_default(),
                         color_code: filament_info.tray_color,
-                        note: tag.note.unwrap_or_default(),
-                        brand: tag.brand.unwrap_or_default(),
-                        weight_left: None,
+                        note: tag_info.note.unwrap_or_default(),
+                        brand: tag_info.brand.unwrap_or_default(),
+                        weight_left: weight,
                     };
                     if let Some(spools_db) = store.spools_db.get() {
+                        if weight.is_none() {
+                            if let Some(current_rec) = spools_db.records.borrow().get(&spool_rec.tag_id) {
+                                spool_rec.weight_left = current_rec.data.weight_left;
+                            }
+                        }
                         match spools_db.insert(spool_rec).await {
-                            Ok(_) => {
-                                info!("Stored tag into spools database");
+                            Ok(true) => {
+                                info!("Stored tag to spools database");
+                            }
+                            Ok(false) => {
+                                info!("Stored tag to spools database, but no change");
                             }
                             Err(e) => {
                                 error!("Error storing record to spools database {e}");
