@@ -244,6 +244,34 @@ impl AppWithStateBuilder for NestedAppBuilder {
             get(move |State(Encryption(key)): State<Encryption>| ready(store_get.query_spools().unwrap())),
         );
 
+        let router = router.route(
+            "/inventory",
+            get_service(picoserve::response::File::with_content_type_and_headers(
+                "text/html",
+                include_bytes!("../static/inventory.html.gz"),
+                &[("Content-Encoding", "gzip")],
+            )),
+        );
+
+        let router = router.route(
+            "/inventory.js",
+            get_service(picoserve::response::File::with_content_type_and_headers(
+                "application/javascript; charset=utf-8",
+                include_bytes!("../static/inventory.js.gz"),
+                &[("Content-Encoding", "gzip")],
+            )),
+        );
+
+        #[allow(clippy::let_and_return)]
+        let router = router.route(
+            "/style.css",
+            get_service(picoserve::response::File::with_content_type_and_headers(
+                "text/css",
+                include_bytes!("../static/style.css.gz"),
+                &[("Content-Encoding", "gzip")],
+            )),
+        );
+
         router
     }
 }

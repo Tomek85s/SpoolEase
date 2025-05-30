@@ -3,10 +3,7 @@ use once_cell::unsync::OnceCell;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 
-use alloc::{
-    rc::Rc,
-    string::{String, ToString},
-};
+use alloc::{rc::Rc, string::String};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel};
 use framework::{
     error, info, mk_static,
@@ -72,7 +69,7 @@ impl Store {
         if let Some(spools_db) = self.spools_db.get() {
             let spool_records = spools_db.records.borrow();
             let total_length = spool_records.values().map(|v| v.length).sum::<usize>();
-            let results : Result<String, CsvDbError> = spool_records.values().try_fold(String::with_capacity(total_length), |mut acc, v| {
+            let results: Result<String, CsvDbError> = spool_records.values().try_fold(String::with_capacity(total_length), |mut acc, v| {
                 let csv = v.to_csv_string();
                 if let Err(e) = &csv {
                     error!("Error serializing to csv: {v:?} : {e}");
@@ -83,7 +80,7 @@ impl Store {
             // TODO: make it an error up as well, to handle in the caller
             match results {
                 Ok(s) => Some(s),
-                Err(_) => None
+                Err(_) => None,
             }
         } else {
             None
