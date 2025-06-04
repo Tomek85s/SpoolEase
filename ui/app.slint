@@ -107,7 +107,9 @@ export enum StatusType {
 
 export enum SpoolStagingState {
   Empty,
-  Loaded,
+  Scanned,
+  Encoded,
+  Unloaded
 }
 
 // Functions to call rust
@@ -234,7 +236,7 @@ export global AppState {
         }
     }
     public function read-tag-succeeded(ui-spool-info: UiSpoolInfo) {
-        self.spool-staging-state = SpoolStagingState.Loaded;
+        self.spool-staging-state = SpoolStagingState.Scanned;
         self.spool-staging-info = ui-spool-info;
         self.control-state = ControlState.PostAction;
         self.user-message = "Tag Scanned to Staging";
@@ -242,8 +244,8 @@ export global AppState {
         start-highlight-tray(999);
     }
 
-    public function update-spool-staging(ui-spool-info: UiSpoolInfo) {
-        self.spool-staging-state = SpoolStagingState.Loaded;
+    public function update-spool-staging(ui-spool-info: UiSpoolInfo, state: SpoolStagingState) {
+        self.spool-staging-state = state;
         self.spool-staging-info = ui-spool-info;
         start-highlight-tray(999);
     }
@@ -357,12 +359,6 @@ export global AppState {
               user-message-type = StatusType.Normal;
         }
         clear-curr-encoding-request();
-    }
-
-    public function new_single_tray_loading(tray_id: int) {
-        if self.spool-staging-state == SpoolStagingState.Loaded {
-            self.staging-to-tray = tray_id;
-        }
     }
 
     public function show-spoolscale-dialog(message: string, type: StatusType) {

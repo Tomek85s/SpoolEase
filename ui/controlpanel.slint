@@ -65,7 +65,7 @@ export component ControlPanelBase inherits HorizontalLayout {
     spacing: 4px;
     VerticalLayout {
         function weight-display() -> string {
-            if AppState.spool-staging-state == SpoolStagingState.Loaded && AppState.spool-staging-info.weight-core != 0 {
+            if AppState.spool-staging-state != SpoolStagingState.Empty && AppState.spool-staging-info.weight-core != 0 {
                 return "\{AppState.spool-scale-weight - AppState.spool-staging-info.weight-core}g / \{AppState.spool-scale-weight}g";
             } else {
                 return "\{AppState.spool-scale-weight}g";
@@ -182,8 +182,8 @@ export component Ready inherits ControlPanelBase {
 
     message-color: color-timer.color;
     message-text: (AppState.spool-staging-state == SpoolStagingState.Empty) ? ("Scanning for Tagged Spool..." + (AppState.available-printers.length > 1 ? "\n\n\{AppState.curr-printer}" : "")) : "Load Spool\nor Rescan Tag" + (AppState.available-printers.length > 1 ? "\n\n\{AppState.curr-printer}" : "");
-    button1-text: (AppState.spool-staging-state == SpoolStagingState.Loaded) ? "Clear Staging" : "";
-    button1-timeout: (AppState.spool-staging-state == SpoolStagingState.Loaded) ? 60 : 0;
+    button1-text: (AppState.spool-staging-state != SpoolStagingState.Empty) ? "Clear Staging" : "";
+    button1-timeout: (AppState.spool-staging-state != SpoolStagingState.Empty) ? 60 : 0;
     button2-text: "Encode Tag";
     clicked1() => {
         AppBackend.clear-staging();
@@ -317,7 +317,7 @@ export component ControlPanel inherits HorizontalLayout {
         triggered() => {
             if AppState.control-state == ControlState.EncodeSelectSource {
                 AppState.highlight-trays = !AppState.highlight-trays;
-                if AppState.spool-staging-state == SpoolStagingState.Loaded {
+                if AppState.spool-staging-state != SpoolStagingState.Empty {
                     AppState.highlight-staging = AppState.highlight-trays;
                 }
             } else if AppState.control-state == ControlState.StagingSelected {

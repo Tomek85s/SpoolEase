@@ -12,7 +12,7 @@ use alloc::{
     vec::Vec,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use core::{cell::RefCell, str::FromStr};
+use core::{cell::RefCell, mem::swap, str::FromStr};
 use derivative::Derivative;
 use embassy_futures::select::{select, Either};
 use embassy_net::Ipv4Address;
@@ -77,7 +77,7 @@ pub struct BambuPrinter {
 }
 
 pub trait BambuPrinterObserver {
-    fn on_trays_update(&mut self, bambu_printer: &mut BambuPrinter, prev_tray_reading_bits: Option<u32>, new_tray_reading_bits: Option<u32>);
+    fn on_trays_update(&mut self, bambu_printer: &mut BambuPrinter, prev_tray_reading_bits: Option<u32>, new_tray_reading_bits: Option<u32>, removed_tags: &HashMap<usize, TagInformation>);
     fn on_printer_connect_status(&self, bambu_printer: &mut BambuPrinter, status: bool);
 }
 
@@ -86,11 +86,13 @@ impl BambuPrinter {
     pub fn ams_trays(&self) -> &[Tray; 16] {
         &self.inner_ams_trays
     }
-    pub fn set_ams_tray(&mut self, index: usize, tray: Tray) {
-        if self.inner_ams_trays[index] != tray {
-            self.inner_ams_trays[index] = tray;
+    pub fn set_ams_tray<'a>(&mut self, index: usize, tray: &'a mut Tray) -> &'a mut Tray {
+        if self.inner_ams_trays[index] != *tray {
+            swap(&mut self.inner_ams_trays[index], tray);
+            // self.inner_ams_trays[index] = tray;
             self.ams_trays_dirty[index] = true;
         }
+        tray
     }
     pub fn update_ams_tray<F>(&mut self, index: usize, f: F)
     where
@@ -599,8 +601,9 @@ impl BambuPrinter {
     }
 
     #[allow(non_snake_case)]
-    pub fn process_print_message__push_status__ams(&mut self, ams: &PrintAms) -> bool {
+    pub fn process_print_message__push_status__ams(&mut self, ams: &PrintAms) -> (bool, HashMap<usize, TagInformation>) {
         let mut change_made = false;
+        let prev_tray_exist_bits = self.tray_exist_bits;
 
         // first check which ams's exist
         if let Some(ams_exist_bits) = &ams.ams_exist_bits {
@@ -647,7 +650,12 @@ impl BambuPrinter {
             }
         }
 
+        let mut removed_tags: HashMap<usize, TagInformation> = HashMap::new();
+
         for tray_id in 0..self.ams_trays().len() {
+            let spool_removed = if let (Some(prev_tray_exist_bits), Some(new_tray_exist_bits)) = (&prev_tray_exist_bits, &self.tray_exist_bits) {
+                (((prev_tray_exist_bits >> tray_id) & 0x01) != 0) && (((new_tray_exist_bits >> tray_id) & 0x01) == 0)
+            } else { false };
             let (ams_id, ams_tray_id) = BambuPrinter::get_ams_and_tray_id(tray_id);
             let ams_id_str = format!("{ams_id}");
             let source_tray = if let Some(amss) = &ams.ams {
@@ -662,12 +670,22 @@ impl BambuPrinter {
             };
             let old_tray = &self.ams_trays()[tray_id];
             let new_tray = self.get_updated_tray(old_tray, source_tray, Some(tray_id));
-            if let Some(new_tray) = new_tray {
+            if let Some(mut new_tray) = new_tray {
                 change_made = true;
-                self.set_ams_tray(tray_id, new_tray);
+                let prev_tray = self.set_ams_tray(tray_id, &mut new_tray);
+                
+                if spool_removed {
+                    if let Some(prev_tag_info) = prev_tray.tag_info.take() {
+                        if self.ams_trays()[tray_id].tag_info.is_none() {
+                            // Before there was a tag and spool removed, add it to the list
+                           removed_tags.insert(tray_id, prev_tag_info);
+                        }
+                    } 
+
+                }
             }
         }
-        change_made
+        ( change_made, removed_tags )
     }
 
     #[allow(non_snake_case)]
@@ -781,7 +799,7 @@ impl BambuPrinter {
         change_made
     }
 
-    pub fn process_print_message(&mut self, print: &bambu_api::PrintData) -> bool {
+    pub fn process_print_message(&mut self, print: &bambu_api::PrintData) -> (bool, HashMap<usize, TagInformation>) {
         if let Some(sequence_id) = &print.sequence_id {
             if self.log_filter >= log::Level::Debug {
                 debug!("[{}] -> Message {}", self.printer_number, sequence_id);
@@ -793,6 +811,7 @@ impl BambuPrinter {
         // Therefore, to issue an event need to call update_ams_trays_done afterwards through a non mut reference (so not borrow_mut if refcell)
         //   in order to issue the event on observers
         let mut change_made = false;
+        let mut removed_tags = HashMap::<usize, TagInformation>::new();
         if let Some(command) = &print.command {
             if command == "push_status" {
                 // get a snapshot of trays before, to later be able to update cali_idx if removed
@@ -812,7 +831,7 @@ impl BambuPrinter {
                     nozzle_diameter_change_made = old_nozzle_diameter != *self.nozzle_diameter();
                 }
                 if let Some(ams) = &print.ams {
-                    ams_change_made = self.process_print_message__push_status__ams(ams);
+                    (ams_change_made, removed_tags) = self.process_print_message__push_status__ams(ams);
                 }
                 if let Some(v_tray) = &print.vt_tray {
                     vt_tray_change_made = self.process_print_message__push_status__vt_tray(v_tray);
@@ -863,7 +882,7 @@ impl BambuPrinter {
                 debug!("[{}]    {command} message", &self.printer_number);
             }
         }
-        change_made
+        (change_made, removed_tags)
     }
 
     pub fn notify_printer_connect_status(&mut self, status: bool) {
@@ -874,13 +893,13 @@ impl BambuPrinter {
         }
     }
 
-    pub fn update_ams_trays_done(&mut self, prev_trays_reading_bits: Option<u32>, new_trays_reading_bits: Option<u32>) {
+    pub fn update_ams_trays_done(&mut self, prev_trays_reading_bits: Option<u32>, new_trays_reading_bits: Option<u32>, removed_tags: &HashMap<usize, TagInformation>) {
         let mut observers = self.observers.clone(); // to avoid two references - can probably optimize in various ways
         for weak_observer in observers.iter_mut() {
             let observer = weak_observer.upgrade().unwrap();
             observer
                 .borrow_mut()
-                .on_trays_update(self, prev_trays_reading_bits, new_trays_reading_bits);
+                .on_trays_update(self, prev_trays_reading_bits, new_trays_reading_bits, removed_tags);
         }
     }
 
@@ -1630,10 +1649,10 @@ pub async fn incoming_messages_task(
                                 }
                                 if !skip {
                                     let previous_reading_bits = bambu_printer.borrow().tray_reading_bits;
-                                    let change_made = (*bambu_printer.borrow_mut()).process_print_message(&print.print);
+                                    let (change_made, removed_tags) = (*bambu_printer.borrow_mut()).process_print_message(&print.print);
                                     let updated_reading_bits = bambu_printer.borrow().tray_reading_bits;
                                     if change_made {
-                                        (*bambu_printer.borrow_mut()).update_ams_trays_done(previous_reading_bits, updated_reading_bits);
+                                        (*bambu_printer.borrow_mut()).update_ams_trays_done(previous_reading_bits, updated_reading_bits, &removed_tags);
                                     }
                                 }
                             } else if log_level >= log::Level::Debug {

@@ -24,6 +24,7 @@ use framework::{
 
 use crate::app_config::{BASE_FILAMENTS, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
 use crate::color_utils::get_color_name;
+use crate::filament_staging::{self, StagingOrigin};
 use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
 use crate::ssdp::{ssdp_task, SSDPPubSubChannel};
 use crate::store::{AnyClone, Cookie, Store, StoreObserver, StoreOp};
@@ -576,7 +577,7 @@ impl ViewModel {
         tray_id: i32,
     ) {
         let mut filament_staging = filament_staging.borrow_mut();
-        if let Some(tag_info) = &filament_staging.tag_info {
+        if let Some(tag_info) = filament_staging.tag_info() {
             bambu_printer.set_tray_filament(tray_id, tag_info);
             filament_staging.clear();
             ui.unwrap().global::<crate::app::AppState>().invoke_empty_spool_staging();
@@ -598,7 +599,7 @@ impl ViewModel {
         tray_id: i32,
     ) {
         let mut filament_staging = filament_staging.borrow_mut();
-        if let Some(tag_info) = &filament_staging.tag_info {
+        if let Some(tag_info) = filament_staging.tag_info() {
             bambu_printer.borrow_mut().set_tray_filament(tray_id, tag_info);
             filament_staging.clear();
             ui.unwrap().global::<crate::app::AppState>().invoke_empty_spool_staging();
@@ -654,7 +655,7 @@ impl ViewModel {
             let borrowed_filament_staging = moved_filament_staging.borrow();
             let mut tag_info_to_encode = if tray_id == 999 {
                 // Encode from Staging
-                if let Some(staging_tag_info) = borrowed_filament_staging.tag_info.clone() {
+                if let Some(staging_tag_info) = borrowed_filament_staging.tag_info().clone() {
                     staging_tag_info
                 } else {
                     return 0; // signals an error, UI will not continue
@@ -733,9 +734,9 @@ impl ViewModel {
                     }
                     999 => {
                         // Staging
-                        if let Some(tag_info) = &staging_borrow.tag_info {
+                        if let Some(tag_info) = staging_borrow.tag_info() {
                             if let Some(filament_info) = &tag_info.filament {
-                                (Some(filament_info.clone()), &staging_borrow.tag_info)
+                                (Some(filament_info.clone()), staging_borrow.tag_info())
                             } else {
                                 (None, &None)
                             }
@@ -874,13 +875,12 @@ impl ViewModel {
             });
     }
 
-    fn tag_info_to_ui_spool_info(&self, tag_info: &TagInformation) -> Option<crate::app::UiSpoolInfo> {
+    fn tag_info_to_ui_spool_info_direct(&self, bambu_printer_borrow: &BambuPrinter, tag_info: &TagInformation)-> Option<crate::app::UiSpoolInfo> {
         tag_info.filament.as_ref()?; // returns None if tag_info.filament is None
         let filament_info = tag_info.filament.as_ref().unwrap();
 
         let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
 
-        let bambu_printer_borrow = self.bambu_printer_model.borrow();
         let mut final_k = bambu_printer_borrow.get_tag_k_for_current_nozzle(tag_info);
         if let Some(calibration) = tag_info
             .calibrations
@@ -898,6 +898,11 @@ impl ViewModel {
             weight_core: tag_info.weight_core.unwrap_or_default(),
         };
         Some(ui_spool_info)
+    }
+
+    fn tag_info_to_ui_spool_info(&self, tag_info: &TagInformation) -> Option<crate::app::UiSpoolInfo> {
+        let bambu_printer_borrow = self.bambu_printer_model.borrow();
+        self.tag_info_to_ui_spool_info_direct(&bambu_printer_borrow, tag_info)
     }
 
     fn update_ui_from_printer(&self, bambu_printer: &BambuPrinter) {
@@ -975,7 +980,7 @@ impl From<&TrayState> for crate::app::UiTrayState {
 }
 
 impl BambuPrinterObserver for ViewModel {
-    fn on_trays_update(&mut self, bambu_printer: &mut BambuPrinter, prev_trays_reading_bits: Option<u32>, new_trays_reading_bits: Option<u32>) {
+    fn on_trays_update(&mut self, bambu_printer: &mut BambuPrinter, prev_trays_reading_bits: Option<u32>, new_trays_reading_bits: Option<u32>, removed_tags: &HashMap<usize, TagInformation>) {
         // note - accepting bambu_printer rather than taking from self, because it's already borrowed and another borrow will panic
         let current_selected_printer = self.bambu_printer_model.index;
 
@@ -999,14 +1004,26 @@ impl BambuPrinterObserver for ViewModel {
             if trays_reading_changed.len() == 1 {
                 let only_reading_tray = trays_reading_changed[0];
                 info!("Single tray {only_reading_tray} is loading now");
-                self.set_staging_to_tray_direct(
-                    &self.filament_staging.clone(),
-                    bambu_printer,
-                    &self.ui_weak.clone(),
-                    only_reading_tray as i32,
-                );
+                if *self.filament_staging.borrow().origin() != StagingOrigin::Unloaded {
+                    self.set_staging_to_tray_direct(
+                        &self.filament_staging.clone(),
+                        bambu_printer,
+                        &self.ui_weak.clone(),
+                        only_reading_tray as i32,
+                    );
+                }
             }
             // }
+        }
+        // Unloaded spool case - load tag if exist on that spool to staging (for weighting)
+        if let Some(removed_tag) = removed_tags.iter().next() {
+           let mut filament_staging = self.filament_staging.borrow_mut();
+           if [StagingOrigin::Empty, StagingOrigin::Unloaded].contains(filament_staging.origin()) { // only if empty or was unloaded (so not scanned or encoded)
+                if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info_direct(bambu_printer, removed_tag.1) {
+                    filament_staging.set_tag_info(removed_tag.1.clone(), filament_staging::StagingOrigin::Unloaded);
+                    self.ui_weak.unwrap().global::<crate::app::AppState>().invoke_update_spool_staging(ui_spool_info, crate::app::SpoolStagingState::Unloaded);
+                }
+            }
         }
     }
 
@@ -1052,8 +1069,8 @@ impl SpoolTagObserver for ViewModel {
                 if let Ok(tag_info) = TagInformation::from_descriptor(encoded_descriptor) {
                     let tag_info_clone = if self.store.is_available() { Some(tag_info.clone()) } else { None };
                     if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info(&tag_info) {
-                        self.filament_staging.borrow_mut().tag_info = Some(tag_info);
-                        ui.unwrap().global::<crate::app::AppState>().invoke_update_spool_staging(ui_spool_info);
+                        self.filament_staging.borrow_mut().set_tag_info(tag_info, StagingOrigin::Encoded);
+                        ui.unwrap().global::<crate::app::AppState>().invoke_update_spool_staging(ui_spool_info, crate::app::SpoolStagingState::Encoded);
                         ui.unwrap().global::<crate::app::AppState>().invoke_encoding_succeeded(ams_id, tray_id);
                     } else {
                         ui.unwrap()
@@ -1075,7 +1092,7 @@ impl SpoolTagObserver for ViewModel {
                 if let Ok(tag_info) = TagInformation::from_descriptor(read_text) {
                     let tag_info_clone = if self.store.is_available() { Some(tag_info.clone()) } else { None };
                     if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info(&tag_info) {
-                        self.filament_staging.borrow_mut().tag_info = Some(tag_info);
+                        self.filament_staging.borrow_mut().set_tag_info(tag_info, StagingOrigin::Scanned);
                         ui.unwrap().global::<crate::app::AppState>().invoke_read_tag_succeeded(ui_spool_info);
                     } else {
                         ui.unwrap()
@@ -1329,7 +1346,7 @@ impl SpoolScaleObserver for ViewModel {
     fn on_button_pressed(&mut self, scale_weight: ScaleWeight) -> Option<bool> {
         let ui = self.ui_weak.unwrap();
         let ui_app_state = ui.global::<crate::app::AppState>();
-        if let Some(tag_info) = &self.filament_staging.borrow().tag_info {
+        if let Some(tag_info) = self.filament_staging.borrow().tag_info() {
             match scale_weight {
                 ScaleWeight::Stable(weight) => {
                     if weight == 0 {

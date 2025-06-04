@@ -14,7 +14,9 @@ export component SpoolStaging inherits Window {
             height: 30px;
             Text {
                 color: utils.contrasting_color(title.background);
-                text: "Staging";
+                text: AppState.spool-staging-state == SpoolStagingState.Empty ? "Staging" :
+                      AppState.spool-staging-state == SpoolStagingState.Scanned ? "Scanned" :
+                      AppState.spool-staging-state == SpoolStagingState.Encoded ? "Encoded" : "Unloaded";
                 font-size: 20px;
             }
 
@@ -26,9 +28,9 @@ export component SpoolStaging inherits Window {
 
         Window {
             filament-box := Rectangle {
-                background: (AppState.spool-staging-state == SpoolStagingState.Loaded) ? AppState.spool-staging-info.color : AppConsts.no-color;
+                background: (AppState.spool-staging-state != SpoolStagingState.Empty) ? AppState.spool-staging-info.color : AppConsts.no-color;
 
-                if AppState.spool-staging-state == SpoolStagingState.Loaded: 
+                if AppState.spool-staging-state != SpoolStagingState.Empty: 
                 VerticalLayout {
                     property <bool> show-weight: AppState.spool-staging-info.weight-core > 0;
                     alignment: space-around;
@@ -85,7 +87,7 @@ export component SpoolStaging inherits Window {
         }
     }
 
-    if (AppState.highlight-tray == 999 && AppState.highlight-tray-flash) || (AppState.highlight-staging && AppState.spool-staging-state == SpoolStagingState.Loaded): highlight-border := Rectangle {
+    if (AppState.highlight-tray == 999 && AppState.highlight-tray-flash) || (AppState.highlight-staging && AppState.spool-staging-state != SpoolStagingState.Empty): highlight-border := Rectangle {
         width: parent.width;
         height: parent.height;
         border-width: 4px;
@@ -96,7 +98,7 @@ export component SpoolStaging inherits Window {
         width: parent.width;
         height: parent.height;
         clicked => {
-            if AppState.spool-staging-state == SpoolStagingState.Loaded {
+            if AppState.spool-staging-state != SpoolStagingState.Empty {
                 if AppState.control-state == ControlState.EncodeSelectSource {
                     AppState.encode-select-tray(999);
                 } else if AppState.control-state == ControlState.StagingSelected { // second press on staging (next else is the first press)
