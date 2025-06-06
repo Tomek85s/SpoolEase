@@ -13,26 +13,26 @@ mod app_config;
 mod bambu;
 mod bambu_api;
 mod color_utils;
+mod csvdb;
 mod filament_staging;
 mod my_mqtt;
 mod settings;
 mod spool_scale;
 mod ssdp;
+mod store;
 mod view_model;
 mod web_app;
-mod store;
-mod csvdb;
 
 use alloc::{format, rc::Rc, string::ToString};
-use framework_macros::include_bytes_gz;
 use core::{cell::RefCell, net::Ipv4Addr};
 use embassy_futures::yield_now;
-use esp_alloc as _;
+use esp_alloc::{self as _, HeapStats};
 use esp_backtrace as _;
 use esp_hal_ota::Ota;
 use esp_mbedtls::Tls;
 use esp_storage::FlashStorage;
 use esp_wifi::{init, EspWifiController};
+use framework_macros::include_bytes_gz;
 use slint::ComponentHandle;
 
 extern crate alloc;
@@ -125,6 +125,8 @@ async fn main(spawner: Spawner) {
 
     // Last, reserve from 'standard' area, if need additional memory for esp-wifi/esp-mbedtls, need to increase this
     esp_alloc::heap_allocator!(120 * 1024);
+
+    spawner.spawn(heap_stats_task()).ok();
 
     // == Setup timers & delay ========================================================
 
@@ -476,3 +478,12 @@ async fn web_server_task(runner: &'static framework::web_server::WebAppRunner<Ne
 pub async fn display_runner(mut runner: WT32SC01PlusRunner<esp_hal::dma::DmaChannel0, esp_hal::peripherals::I2C0>) {
     runner.run().await;
 }
+
+ #[embassy_executor::task]
+ pub async fn heap_stats_task() {
+     loop {
+         let stats: HeapStats = esp_alloc::HEAP.stats();
+         debug!("{}", stats);
+         Timer::after_secs(30).await;
+     }
+ }
