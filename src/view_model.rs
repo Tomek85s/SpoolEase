@@ -736,6 +736,10 @@ impl ViewModel {
                         // Staging
                         if let Some(tag_info) = staging_borrow.tag_info() {
                             if let Some(filament_info) = &tag_info.filament {
+                                if let Some((nozzle_diameter, calibration)) = &tag_info.calibrations.iter().next() {
+                                    encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name).into();
+                                    encode_request_display.pa_line1 = format!("{}, {}", tag_info.calibrations_printer_name, nozzle_diameter).into();
+                                }
                                 (Some(filament_info.clone()), staging_borrow.tag_info())
                             } else {
                                 (None, &None)
@@ -847,7 +851,8 @@ impl ViewModel {
                     if !found_filament_name {
                         encode_request_display.slicer_name = "Unknown Filament".into();
                     }
-                    if !encode_request_display.pa_line2.is_empty() {
+                    if encode_request_display.pa_line1.is_empty() && !encode_request_display.pa_line2.is_empty() {
+                        // if there is a line 2 but line 1 was not filled (staging case)
                         encode_request_display.pa_line1 = format!(
                             "{}, {}",
                             moved_bambu.borrow().printer_name,
