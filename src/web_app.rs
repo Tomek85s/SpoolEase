@@ -6,6 +6,7 @@ use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use framework::framework_web_app::encrypt;
 use picoserve::routing::{get, get_service};
 use picoserve::{
     extract::{FromRequest, State},
@@ -253,7 +254,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
             get(move |State(Encryption(key)): State<Encryption>| {
                 ready({
                     match store_get.query_spools() {
-                        Some(csv) => csv,
+                        Some(csv) => encrypt(&key.borrow(), &csv),
                         None => {
                             error!("Failed to generate response to spoole query");
                             "".to_string()
@@ -267,7 +268,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
             "/inventory",
             get_service(picoserve::response::File::with_content_type_and_headers(
                 "text/html",
-                include_bytes!("../static/inventory.html.gz"),
+                include_bytes!("../../inventory/dist/index.html.gz"),
                 &[("Content-Encoding", "gzip")],
             )),
         );
@@ -276,7 +277,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
             "/inventory.js",
             get_service(picoserve::response::File::with_content_type_and_headers(
                 "application/javascript; charset=utf-8",
-                include_bytes!("../static/inventory.js.gz"),
+                include_bytes!("../../inventory/dist/inventory.js.gz"),
                 &[("Content-Encoding", "gzip")],
             )),
         );
@@ -286,7 +287,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
             "/style.css",
             get_service(picoserve::response::File::with_content_type_and_headers(
                 "text/css",
-                include_bytes!("../static/style.css.gz"),
+                include_bytes!("../../inventory/dist/style.css.gz"),
                 &[("Content-Encoding", "gzip")],
             )),
         );
