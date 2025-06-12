@@ -607,7 +607,7 @@ impl BambuPrinter {
 
         // first check which ams's exist
         if let Some(ams_exist_bits) = &ams.ams_exist_bits {
-            let ams_exist_bits = ams_exist_bits.parse::<u32>();
+            let ams_exist_bits = u32::from_str_radix(ams_exist_bits, 16);
             if let Ok(ams_exist_bits) = ams_exist_bits {
                 if self.ams_exist_bits.is_none() || self.ams_exist_bits.unwrap() != ams_exist_bits {
                     self.ams_exist_bits = Some(ams_exist_bits);
