@@ -641,6 +641,7 @@ impl ViewModel {
         let moved_spool_tag = self.spool_tag_model.clone();
         let moved_ui = self.ui_weak.clone();
         let moved_view_model = self.view_model.clone().unwrap();
+        let moved_spool_scale = self.spool_scale_model.clone();
         moved_ui.unwrap().global::<crate::app::AppBackend>().on_encode_tag(move |encode_request| {
             info!("Request to encode tag with tray {} info", encode_request.tray_id);
             // Start with adding the core info to the previoysly used list
@@ -694,7 +695,9 @@ impl ViewModel {
                 )
             };
             if let Some(descriptor) = descriptor_res {
-                spool_tag.write_tag(descriptor, tray_id);
+                let scale_weight = moved_spool_scale.borrow().weight;
+                let cookie = serde_json::to_string(&scale_weight).unwrap_or_default();
+                spool_tag.write_tag(descriptor, tray_id, cookie);
             }
             info!("Sent the write request of tray {}", tray_id);
             // TODO: Get proper timeout fron config and pass it in the write_tag to spool_tag
@@ -1077,7 +1080,7 @@ impl SpoolTagObserver for ViewModel {
             Status::FoundTagNowWriting => {
                 ui.unwrap().global::<crate::app::AppState>().invoke_encode_tag_found();
             }
-            Status::WriteSuccess(pure_tray_id, encoded_descriptor) => {
+            Status::WriteSuccess(pure_tray_id, encoded_descriptor, cookie) => {
                 let (ams_id, tray_id) = BambuPrinter::get_ams_and_tray_id(*pure_tray_id);
                 let ams_id = ams_id as i32;
                 let tray_id = tray_id as i32;
@@ -1096,10 +1099,16 @@ impl SpoolTagObserver for ViewModel {
                             .invoke_encoding_failed(SharedString::from("Descriptor Generation Error"));
                     }
                     if let Some(tag_info) = tag_info_clone {
+                        let mut weight_directive = WeightStoreDirective::UseStoreCurrentWeight;
+                        if let Ok(ScaleWeight::Stable(stable_weight)) = serde_json::from_str(cookie) {
+                            if stable_weight != 0 { // The threshold is set in SpoolEase Scale as const 5g
+                                weight_directive = WeightStoreDirective::ProvidedCurrentWeight(stable_weight);
+                            }
+                        }
                         if let Err(err) = self.store.try_send_op(StoreOp::WriteTag {
                             tag_info,
                             tag_file: TagFileDirective::AlwaysWrite,
-                            weight: WeightStoreDirective::UseStoreCurrentWeight,
+                            weight: weight_directive,
                             cookie: Box::new(StoreWriteTagCookie { notify_scale: false }),
                         }) {
                             info!("Error writing tag to store : {}", err);
@@ -1435,7 +1444,7 @@ impl StoreObserver for ViewModel {
         if let Ok(cookie) = cookie.into_any().downcast::<StoreWriteTagCookie>() {
             let ui = self.ui_weak.unwrap();
             let ui_app_state = ui.global::<crate::app::AppState>();
-            // on success we update only if came as request to store weight from scale 
+            // on success we update only if came as request to store weight from scale
             if cookie.notify_scale {
                 self.spool_scale_model.borrow().button_response(result.is_ok());
                 if result.is_ok() {

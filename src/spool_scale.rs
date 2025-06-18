@@ -4,6 +4,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+use serde::{Deserialize, Serialize};
 use core::{
     cell::RefCell,
     net::{Ipv4Addr, SocketAddr},
@@ -30,7 +31,7 @@ use crate::{app_config::AppConfig, ssdp::SSDPPubSubChannel};
 pub type ConsoleToScaleChannel = Channel<NoopRawMutex, ConsoleToScale, 5>;
 
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum ScaleWeight {
     Unknown,
     Stable(i32),
