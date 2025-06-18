@@ -440,7 +440,7 @@ impl BambuPrinter {
     }
 
     fn tray_from_update(&self, tray_update: &PrintTray) -> Result<Option<Tray>, String> {
-        if let (Some(tray_type_update), Some(tray_info_idx_update), Some(tray_color_update)) =
+        if let (Some(tray_type_update), Some(tray_info_idx_update), Some(_tray_color_update)) =
             (&tray_update.tray_type, &tray_update.tray_info_idx, &tray_update.tray_color)
         {
             // Remember: tray_type is the material(PLA, PETG, etc), tray_info_idx is the filament_id (some code)
@@ -464,12 +464,6 @@ impl BambuPrinter {
                 warn!("[{}] ???? tray_info_idx with 00 suffix", self.printer_number);
                 debug!("[{}] {:?}", self.printer_number, tray_update);
                 return Err("tray_info_idx junk".to_string());
-            }
-
-            if !tray_color_update.ends_with("FF") {
-                warn!("[{}] ???? tray_color with Not FF suffix, either color not set in Bambustudio or transparent", self.printer_number);
-                debug!("[{}] {:?}", self.printer_number, tray_update);
-                // return Err("tray_color junk".to_string());
             }
 
             new_tray.filament = if tray_type_update.is_empty() {

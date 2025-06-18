@@ -330,7 +330,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                                 continue;
                             }
                         }
-                        info!("{:?}", spools_db.records.borrow());
+                        // info!("{:?}", spools_db.records.borrow());
                     } else {
                         store.notify_tag_stored(Err("Store for tags not available, SD card removed?"), cookie);
                         continue;

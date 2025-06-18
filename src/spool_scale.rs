@@ -186,6 +186,7 @@ impl SpoolScale {
         }
     }
     pub fn notify_tag_status(&mut self, status: &shared::spool_tag::Status) {
+        info!("Scale tag status: {status:?}");
         for weak_observer in self.observers.iter() {
             let observer = weak_observer.upgrade().unwrap();
             observer.borrow_mut().on_tag_status(status);
