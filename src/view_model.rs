@@ -23,6 +23,7 @@ use framework::{
 };
 
 use crate::app_config::{BASE_FILAMENTS, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
+use crate::bambu::TrayBits;
 use crate::color_utils::get_color_name;
 use crate::filament_staging::{self, StagingOrigin};
 use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
@@ -992,8 +993,8 @@ impl BambuPrinterObserver for ViewModel {
     fn on_trays_update(
         &mut self,
         bambu_printer: &mut BambuPrinter,
-        prev_trays_reading_bits: Option<u32>,
-        new_trays_reading_bits: Option<u32>,
+        prev_trays_bits: &TrayBits,
+        new_trays_bits: &TrayBits,
         removed_tags: &HashMap<usize, TagInformation>,
     ) {
         // note - accepting bambu_printer rather than taking from self, because it's already borrowed and another borrow will panic
@@ -1005,26 +1006,29 @@ impl BambuPrinterObserver for ViewModel {
 
         // ----- Handle loading when there is something in staging -----
         // If the staging is loaded and only a SINGLE slot SWITCHED to reading update it to the stating filament info
-        if let Some(new_trays_reading_bits) = new_trays_reading_bits {
-            let prev_trays_reading_bits = prev_trays_reading_bits.unwrap_or(0);
-            let mut trays_reading_changed = Vec::new();
+        // trace!("------------------------------------------------------");
+        // trace!(">>>>> prev : {prev_trays_bits:?}\n >>>>> next: {new_trays_bits:?}");
+        // trace!("------------------------------------------------------");
+        if let Some(new_trays_monitored_bits) = new_trays_bits.tray_read_done_bits {
+            let prev_trays_monitored_bits = prev_trays_bits.tray_read_done_bits.unwrap_or(0);
+            let mut trays_monitored_changed = Vec::new();
             for tray_id in 0..bambu_printer.ams_trays().len() {
-                let prev_tray_reading_bit = ((prev_trays_reading_bits >> tray_id) & 0x01) != 0;
-                let new_tray_reading_bit = ((new_trays_reading_bits >> tray_id) & 0x01) != 0;
-                if !prev_tray_reading_bit && new_tray_reading_bit {
-                    trays_reading_changed.push(tray_id);
+                let prev_tray_monitored_bit = ((prev_trays_monitored_bits >> tray_id) & 0x01) != 0;
+                let new_tray_monitored_bit = ((new_trays_monitored_bits >> tray_id) & 0x01) != 0;
+                if !prev_tray_monitored_bit && new_tray_monitored_bit {
+                    trays_monitored_changed.push(tray_id);
                 }
             }
             // if bambu_printer.printer_number == 1 { // UNREMARK FOR TESTS WITH ONE PRINTER
-            if trays_reading_changed.len() == 1 {
-                let only_reading_tray = trays_reading_changed[0];
-                info!("Single tray {only_reading_tray} is loading now");
+            if trays_monitored_changed.len() == 1 {
+                let only_monitored_tray = trays_monitored_changed[0];
+                info!("Single tray {only_monitored_tray} is loading now");
                 if *self.filament_staging.borrow().origin() != StagingOrigin::Unloaded {
                     self.set_staging_to_tray_direct(
                         &self.filament_staging.clone(),
                         bambu_printer,
                         &self.ui_weak.clone(),
-                        only_reading_tray as i32,
+                        only_monitored_tray as i32,
                     );
                 }
             }

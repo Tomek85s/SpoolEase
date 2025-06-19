@@ -42,6 +42,14 @@ use crate::{
 
 const FILAMENT_URL_PREFIX: &str = "https://info.filament3d.org/";
 
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct TrayBits {
+    pub tray_exist_bits: Option<u32>,
+    pub tray_read_done_bits: Option<u32>,
+    pub tray_reading_bits: Option<u32>,
+}
+
 pub struct BambuPrinter {
     pub bambu_model: Option<Rc<RefCell<Self>>>,
     pub log_filter: log::LevelFilter,
@@ -77,7 +85,7 @@ pub struct BambuPrinter {
 }
 
 pub trait BambuPrinterObserver {
-    fn on_trays_update(&mut self, bambu_printer: &mut BambuPrinter, prev_tray_reading_bits: Option<u32>, new_tray_reading_bits: Option<u32>, removed_tags: &HashMap<usize, TagInformation>);
+    fn on_trays_update(&mut self, bambu_printer: &mut BambuPrinter, prev_tray_bits: &TrayBits, new_tray_bits: &TrayBits, removed_tags: &HashMap<usize, TagInformation>);
     fn on_printer_connect_status(&self, bambu_printer: &mut BambuPrinter, status: bool);
 }
 
@@ -887,13 +895,13 @@ impl BambuPrinter {
         }
     }
 
-    pub fn update_ams_trays_done(&mut self, prev_trays_reading_bits: Option<u32>, new_trays_reading_bits: Option<u32>, removed_tags: &HashMap<usize, TagInformation>) {
+    pub fn update_ams_trays_done(&mut self, prev_trays_bits: &TrayBits, new_trays_bits: &TrayBits, removed_tags: &HashMap<usize, TagInformation>) {
         let mut observers = self.observers.clone(); // to avoid two references - can probably optimize in various ways
         for weak_observer in observers.iter_mut() {
             let observer = weak_observer.upgrade().unwrap();
             observer
                 .borrow_mut()
-                .on_trays_update(self, prev_trays_reading_bits, new_trays_reading_bits, removed_tags);
+                .on_trays_update(self, prev_trays_bits, new_trays_bits, removed_tags);
         }
     }
 
@@ -1642,11 +1650,19 @@ pub async fn incoming_messages_task(
                                     }
                                 }
                                 if !skip {
-                                    let previous_reading_bits = bambu_printer.borrow().tray_reading_bits;
+                                    let previous_tray_bits = TrayBits {
+                                        tray_reading_bits: bambu_printer.borrow().tray_reading_bits,
+                                        tray_read_done_bits: bambu_printer.borrow().tray_read_done_bits,
+                                        tray_exist_bits: bambu_printer.borrow().tray_exist_bits,
+                                    };
                                     let (change_made, removed_tags) = (*bambu_printer.borrow_mut()).process_print_message(&print.print);
-                                    let updated_reading_bits = bambu_printer.borrow().tray_reading_bits;
+                                    let updated_tray_bits = TrayBits {
+                                        tray_reading_bits: bambu_printer.borrow().tray_reading_bits,
+                                        tray_read_done_bits: bambu_printer.borrow().tray_read_done_bits,
+                                        tray_exist_bits: bambu_printer.borrow().tray_exist_bits,
+                                    };
                                     if change_made {
-                                        (*bambu_printer.borrow_mut()).update_ams_trays_done(previous_reading_bits, updated_reading_bits, &removed_tags);
+                                            (*bambu_printer.borrow_mut()).update_ams_trays_done(&previous_tray_bits, &updated_tray_bits, &removed_tags);
                                     }
                                 }
                             } else if log_level >= log::Level::Debug {
