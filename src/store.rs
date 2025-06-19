@@ -26,10 +26,9 @@ use crate::{
     csvdb::{CsvDb, CsvDbError, CsvDbId},
 };
 
-
 #[derive(Snafu, Debug)]
 pub enum InternalError {
-   TagIdTooLong 
+    TagIdTooLong,
 }
 
 #[derive(Snafu, Debug)]
@@ -38,7 +37,10 @@ pub enum StoreError {
     TooManyOps,
 
     #[snafu(display("Error deleting spool: {source}"))]
-    DeleteSpoolError { source: CsvDbError },
+    CsvDbError { source: CsvDbError },
+
+    #[snafu(display("Internal store software logic error"))]
+    InternalError,
 }
 
 #[allow(clippy::enum_variant_names, dead_code)]
@@ -190,21 +192,43 @@ impl Store {
             if let Ok(Some(record)) = &delete_res {
                 self.tag_id_index.borrow_mut().remove(&record.tag_id);
             }
-            delete_res.context(DeleteSpoolSnafu)?
+            delete_res.context(CsvDbSnafu)?
         } else {
             None
         };
 
         if let Some(deleted_record) = deleted_record {
-            if let Ok(tag_id) = hex::decode(deleted_record.tag_id) {
-                if let Ok(tag_file_path) = tag_file_path(&tag_id) {
-                    let file_store = self.framework.borrow().file_store();
-                    let mut file_store = file_store.lock().await;
-                    let _ = file_store.delete_file(&tag_file_path).await;
+            if !deleted_record.tag_id.is_empty() {
+                if let Ok(tag_id) = hex::decode(deleted_record.tag_id) {
+                    if let Ok(tag_file_path) = tag_file_path(&tag_id) {
+                        let file_store = self.framework.borrow().file_store();
+                        let mut file_store = file_store.lock().await;
+                        let _ = file_store.delete_file(&tag_file_path).await;
+                    }
                 }
             }
         }
         Ok(())
+    }
+
+    pub async fn add_untagged_spool(&self, mut spool_record: SpoolRecord) -> Result<String, StoreError> {
+        let new_spool_id = (*self.last_spool_id.borrow()) + 1;
+        if let Some(spools_db) = &self.spools_db.get() {
+            spool_record.id = new_spool_id.to_string();
+            match spools_db.insert(spool_record).await.context(CsvDbSnafu)? {
+                true => {
+                    *self.last_spool_id.borrow_mut() = new_spool_id;
+                    Ok(new_spool_id.to_string())
+                }
+                false => {
+                    error!("Internal error, add spool added an already existing spool");
+                    Err(StoreError::InternalError)
+                }
+            }
+        } else {
+            error!("Internal error, can't access store");
+            Err(StoreError::InternalError)
+        }
     }
 }
 
@@ -378,7 +402,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                                     }
                                 } else {
                                     continue;
-                                } 
+                                }
                             } else {
                                 error!("Can't save tag_id longer than 7 bytes");
                                 store.notify_tag_stored(Err("Error writing tag file (3), check logs for more details"), cookie);
@@ -393,7 +417,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-struct SpoolRecord {
+pub struct SpoolRecord {
     pub id: String,
     pub tag_id: String,                 // 14 (7*2)
     pub material_type: String,          // 10
@@ -487,12 +511,18 @@ fn tag_file_path(tag_id: &[u8]) -> Result<String, InternalError> {
         return TagIdTooLongSnafu.fail();
     }
     let tag_bucket = fnv1a_hash(tag_id) % 16;
-    Ok(format!(
-        "/store/tags/{:04X}/{}.{}",
-        tag_bucket,
-        &encoded_tag_id[..8],
-        &encoded_tag_id[8..11]
-    ))
+    let file_part = if encoded_tag_id.len() > 8 {
+        let base = &encoded_tag_id[..8];
+        let ext = &encoded_tag_id[8..].get(..3).unwrap_or("");
+        if ext.is_empty() {
+            base.to_string()
+        } else {
+            format!("{}.{}", base, ext)
+        }
+    } else {
+        encoded_tag_id.clone()
+    };
+    Ok(format!("/store/tags/{:04X}/{file_part}", tag_bucket,))
 }
 
 pub fn fnv1a_hash(data: &[u8]) -> u64 {

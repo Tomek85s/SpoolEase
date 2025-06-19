@@ -31,7 +31,7 @@ use crate::view_model::ViewModel;
 
 #[derive(Clone)]
 pub struct ConsoleAppState {
-    pub app_config:Rc<RefCell<AppConfig>>,
+    pub app_config: Rc<RefCell<AppConfig>>,
     pub view_model: Rc<RefCell<ViewModel>>,
     pub store: Rc<Store>,
 }
@@ -70,8 +70,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
         // For that, in order to preserve the hash (for sk=...), using a html/js redirect technique
         let router = router.route(
             "/",
-            get(move | state: State<ConsoleAppState>| {
-                
+            get(move |state: State<ConsoleAppState>| {
                 ready({
                     let redirect_url = &state.0.app_config.borrow().root_redirect;
                     let redirect_html =
@@ -110,24 +109,26 @@ impl AppWithStateBuilder for NestedAppBuilder {
 
         let router = router.route(
             "/api/printer-config",
-            post(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, printers_config_dto: PrintersConfigDTO| {
-                let default_printer_serial = printers_config_dto.default_printer_serial.clone();
-                ready(
-                    match state.0.app_config.borrow_mut().set_printers_config(
-                        printers_config_dto.into(),
-                        DefaultPrinterConfig {
-                            serial: default_printer_serial,
+            post(
+                move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, printers_config_dto: PrintersConfigDTO| {
+                    let default_printer_serial = printers_config_dto.default_printer_serial.clone();
+                    ready(
+                        match state.0.app_config.borrow_mut().set_printers_config(
+                            printers_config_dto.into(),
+                            DefaultPrinterConfig {
+                                serial: default_printer_serial,
+                            },
+                        ) {
+                            Ok(_) => SetConfigResponseDTO { error_text: None }.encrypt(&key.borrow()),
+                            Err(e) => SetConfigResponseDTO {
+                                error_text: Some(format!("{e:?}")),
+                            }
+                            .encrypt(&key.borrow()),
                         },
-                    ) {
-                        Ok(_) => SetConfigResponseDTO { error_text: None }.encrypt(&key.borrow()),
-                        Err(e) => SetConfigResponseDTO {
-                            error_text: Some(format!("{e:?}")),
-                        }
-                        .encrypt(&key.borrow()),
-                    },
-                )
-            })
-            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState> | {
+                    )
+                },
+            )
+            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>| {
                 ready({
                     let borrowed_app_config = state.0.app_config.borrow(); // notice the borrow, can't async here
                     let printers = &borrowed_app_config.configured_printers;
@@ -141,16 +142,18 @@ impl AppWithStateBuilder for NestedAppBuilder {
 
         let router = router.route(
             "/api/scale-config",
-            post(move |State(Encryption(key)): State<Encryption>,  state: State<ConsoleAppState>, scale_config_dto: ScaleConfigDTO| {
-                ready(match state.0.app_config.borrow_mut().set_scale_config(scale_config_dto.into()) {
-                    Ok(_) => SetConfigResponseDTO { error_text: None }.encrypt(&key.borrow()),
-                    Err(e) => SetConfigResponseDTO {
-                        error_text: Some(format!("{e:?}")),
-                    }
-                    .encrypt(&key.borrow()),
-                })
-            })
-            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState> | {
+            post(
+                move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, scale_config_dto: ScaleConfigDTO| {
+                    ready(match state.0.app_config.borrow_mut().set_scale_config(scale_config_dto.into()) {
+                        Ok(_) => SetConfigResponseDTO { error_text: None }.encrypt(&key.borrow()),
+                        Err(e) => SetConfigResponseDTO {
+                            error_text: Some(format!("{e:?}")),
+                        }
+                        .encrypt(&key.borrow()),
+                    })
+                },
+            )
+            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>| {
                 ready({
                     let borrowed_app_config = state.0.app_config.borrow(); // notice the borrow, can't async here
                     let default_scale_config = ScaleConfig::default();
@@ -171,25 +174,27 @@ impl AppWithStateBuilder for NestedAppBuilder {
 
         let router = router.route(
             "/api/spools-config",
-            post(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, SpoolsConfigDTO { spools }| {
-                let spools = if let Some(spools) = spools {
-                    if !spools.trim().is_empty() {
-                        Some(spools.trim().replace("\r\n", "\n").replace("\n", "\r\n"))
+            post(
+                move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, SpoolsConfigDTO { spools }| {
+                    let spools = if let Some(spools) = spools {
+                        if !spools.trim().is_empty() {
+                            Some(spools.trim().replace("\r\n", "\n").replace("\n", "\r\n"))
+                        } else {
+                            None
+                        }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
-                ready(match state.0.app_config.borrow_mut().set_user_cores(spools) {
-                    Ok(_) => SetConfigResponseDTO { error_text: None }.encrypt(&key.borrow()),
-                    Err(e) => SetConfigResponseDTO {
-                        error_text: Some(format!("{e:?}")),
-                    }
-                    .encrypt(&key.borrow()),
-                })
-            })
-            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState> | {
+                    };
+                    ready(match state.0.app_config.borrow_mut().set_user_cores(spools) {
+                        Ok(_) => SetConfigResponseDTO { error_text: None }.encrypt(&key.borrow()),
+                        Err(e) => SetConfigResponseDTO {
+                            error_text: Some(format!("{e:?}")),
+                        }
+                        .encrypt(&key.borrow()),
+                    })
+                },
+            )
+            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>| {
                 ready({
                     let borrowed_app_config = state.0.app_config.borrow(); // notice the borrow, can't async here
                     let spools = &borrowed_app_config.user_cores;
@@ -221,7 +226,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
                     })
                 },
             )
-            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState> | {
+            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>| {
                 ready({
                     let borrowed_app_config = state.0.app_config.borrow(); // notice the borrow, can't async here
                     let custom_filaments = &borrowed_app_config.custom_filaments;
@@ -235,13 +240,15 @@ impl AppWithStateBuilder for NestedAppBuilder {
 
         let router = router.route(
             "/api/encode-info",
-            post(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState> , encode_info: EncodeInfoDTO| {
-                ready({
-                    state.0.view_model.borrow().web_app_set_encode_info(&encode_info);
-                    SetConfigResponseDTO { error_text: None }.encrypt(&key.borrow())
-                })
-            })
-            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>  | {
+            post(
+                move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, encode_info: EncodeInfoDTO| {
+                    ready({
+                        state.0.view_model.borrow().web_app_set_encode_info(&encode_info);
+                        SetConfigResponseDTO { error_text: None }.encrypt(&key.borrow())
+                    })
+                },
+            )
+            .get(move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>| {
                 ready({
                     let encode_info = state.0.view_model.borrow().web_app_get_encode_info();
                     encode_info.encrypt(&key.borrow())
@@ -251,15 +258,12 @@ impl AppWithStateBuilder for NestedAppBuilder {
 
         let router = router.route(
             "/api/spools",
-             get(async move |State(Encryption(key)): State<Encryption>, state : State<ConsoleAppState>| {
-                 {
-                     match state.0.store.query_spools() {
-                         Some(csv) => encrypt(&key.borrow(), &csv),
-                         None => {
-                             error!("Failed to generate response to spoole query");
-                             "".to_string()
-                            }
-                        }
+            get(
+                async move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>| match state.0.store.query_spools() {
+                    Some(csv) => encrypt(&key.borrow(), &csv),
+                    None => {
+                        error!("Failed to generate response to spoole query");
+                        "".to_string()
                     }
                 },
             ),
@@ -271,18 +275,56 @@ impl AppWithStateBuilder for NestedAppBuilder {
                 async move |State(Encryption(key)): State<Encryption>, State(state): State<ConsoleAppState>, delete_spool: DeleteSpoolDTO| {
                     let store = state.store;
                     match store.delete_spool(&delete_spool.id).await {
-                        Ok(_) => { 
-                            match store.query_spools() {
+                        Ok(_) => match store.query_spools() {
+                            Some(csv) => encrypt(&key.borrow(), &csv),
+                            None => {
+                                error!("Failed to generate response to spoole query");
+                                "".to_string()
+                            }
+                        },
+                        Err(err) => {
+                            error!("Failed to delete spool {} : {err}", delete_spool.id);
+                            err.to_string()
+                        }
+                    }
+                },
+            ),
+        );
+
+        let router = router.route(
+            "/api/spools/add",
+            post(
+                async move |State(Encryption(key)): State<Encryption>, State(state): State<ConsoleAppState>, add_spool: AddSpoolDTO| {
+                    let store = state.store;
+                    let new_spool = crate::store::SpoolRecord {
+                        id: String::new(),
+                        tag_id: String::new(),
+                        material_type: add_spool.material,
+                        material_subtype: add_spool.subtype,
+                        color_name: add_spool.color_name,
+                        color_code: add_spool.rgba,
+                        note: add_spool.note,
+                        brand: add_spool.brand,
+                        weight_advertised: Some(add_spool.label_weight),
+                        weight_core: None,
+                        weight_new: None,
+                        weight_current: None,
+                    };
+                    match store.add_untagged_spool(new_spool).await {
+                        Ok(new_id) => match store.query_spools() {
                             Some(csv) => {
-                                encrypt(&key.borrow(), &csv)
+                                AddSpoolDTOResponse {
+                                    id: new_id,
+                                    csv,
+                                }.encrypt(&key.borrow())
                             }
                             None => {
                                 error!("Failed to generate response to spoole query");
                                 "".to_string()
                             }
-                        }}
+                        },
                         Err(err) => {
-                            error!("Failed to delete spool {} : {err}", delete_spool.id);
+                            error!("Failed to delete spool : {err}");
                             err.to_string()
                         }
                     }
@@ -440,6 +482,24 @@ pub struct DeleteSpoolDTO {
     pub id: String,
 }
 encrypted_input!(DeleteSpoolDTO);
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct AddSpoolDTO {
+    pub rgba: String,
+    pub color_name: String,
+    pub material: String,
+    pub subtype: String,
+    pub brand: String,
+    pub label_weight: i32,
+    pub note: String,
+}
+encrypted_input!(AddSpoolDTO);
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct AddSpoolDTOResponse {
+    pub id: String,
+    pub csv: String,
+}
 
 struct HtmlStringResponse {
     html: String,
