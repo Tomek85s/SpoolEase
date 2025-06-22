@@ -28,7 +28,7 @@ use crate::color_utils::get_color_name;
 use crate::filament_staging::{self, StagingOrigin};
 use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
 use crate::ssdp::{ssdp_task, SSDPPubSubChannel};
-use crate::store::{AnyClone, Cookie, Store, StoreObserver, StoreOp, TagFileDirective, WeightStoreDirective};
+use crate::store::{AnyClone, Cookie, FieldsOverrideDirective, Store, StoreObserver, StoreOp, TagFileDirective, WeightStoreDirective};
 use crate::web_app::EncodeInfoDTO;
 use crate::{
     app_config::AppConfig,
@@ -116,7 +116,7 @@ impl ViewModel {
             spool_tag_model: spool_tag_model.clone(),
             spool_scale_model: spool_scale_model.clone(),
             app_config: app_config.clone(),
-            filament_staging: Rc::new(RefCell::new(FilamentStaging::new())),
+            filament_staging: Rc::new(RefCell::new(FilamentStaging::new(store.clone()))),
             printers_view_state: HashMap::new(),
             cores_list_vec_rc: selector_options_vec_rc,
             spools_cores_weights,
@@ -1139,6 +1139,7 @@ impl SpoolTagObserver for ViewModel {
                             tag_info,
                             tag_file: TagFileDirective::AlwaysWrite,
                             weight: weight_directive,
+                            fields: FieldsOverrideDirective::TagOverride, // when encoding, the encode data should overide conflicting fields
                             cookie: Box::new(StoreWriteTagCookie { notify_scale: false }),
                         }) {
                             info!("Error writing tag to store : {}", err);
@@ -1162,6 +1163,7 @@ impl SpoolTagObserver for ViewModel {
                             tag_info,
                             tag_file: TagFileDirective::WriteIfMissing,
                             weight: WeightStoreDirective::UseStoreCurrentWeight,
+                            fields: FieldsOverrideDirective::StoreOverride, // when scanning, the store should overide conflicting fields
                             cookie: Box::new(StoreWriteTagCookie { notify_scale: false }),
                         }) {
                             info!("Error writing tag to store : {}", err);
@@ -1419,6 +1421,7 @@ impl SpoolScaleObserver for ViewModel {
                         tag_info: tag_info.clone(),
                         tag_file: TagFileDirective::WriteIfMissing,
                         weight: WeightStoreDirective::ProvidedCurrentWeight(weight),
+                        fields: FieldsOverrideDirective::StoreOverride,
                         cookie: Box::new(StoreWriteTagCookie { notify_scale: true }),
                     }) {
                         info!("Error writing tag to store : {}", err);

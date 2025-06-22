@@ -1,10 +1,10 @@
+use crate::csvdb::deserialize_optional;
 use core::{any::Any, cell::RefCell};
 use hashbrown::HashMap;
 use num_traits::Float;
 use once_cell::unsync::OnceCell;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
-use crate::csvdb::deserialize_optional;
 
 use alloc::{
     borrow::Cow,
@@ -64,12 +64,19 @@ pub enum TagFileDirective {
 }
 
 #[derive(Debug)]
+pub enum FieldsOverrideDirective {
+    TagOverride,
+    StoreOverride,
+}
+
+#[derive(Debug)]
 pub enum StoreOp {
     WriteTag {
         tag_info: TagInformation,
         tag_file: TagFileDirective,
         weight: WeightStoreDirective,
         cookie: Box<dyn AnyClone>,
+        fields: FieldsOverrideDirective,
     },
 }
 
@@ -269,6 +276,19 @@ impl Store {
             Err(StoreError::InternalError)
         }
     }
+    pub fn get_spool_by_hex_tag(&self, tag_id_hex: &str) -> Option<SpoolRecord> {
+        if let Some(spools_db) = self.spools_db.get() {
+            if let Some(spool_id) = self.tag_id_index.borrow().get(tag_id_hex) {
+                if let Some(current_rec) = spools_db.records.borrow().get(spool_id) {
+                    return Some(current_rec.data.clone());
+                }
+            }
+        }
+        None
+    }
+    pub fn get_spool_by_tag_id(&self, tag_id:&[u8]) -> Option<SpoolRecord> {
+        self.get_spool_by_hex_tag(&tag_id_hex(tag_id))
+    }
 }
 
 #[embassy_executor::task] // up to two printers in parallel
@@ -322,13 +342,15 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                 tag_info,
                 tag_file,
                 weight,
+                fields,
                 cookie,
             } => {
                 if tag_info.tag_id.is_some() {
                     let filament_info = tag_info.filament.unwrap_or(FilamentInfo::new());
-                    let tag_id_hex = hex::encode_upper(tag_info.tag_id.as_ref().unwrap());
+                    let tag_id_hex = tag_id_hex(tag_info.tag_id.as_ref().unwrap());
                     let mut tag_id_already_exist = false;
                     let mut existing_record_current_weight = None;
+                    let mut existing_record_current_note = "".to_string();
                     let mut use_spool_id = String::new();
 
                     if let Some(spools_db) = store.spools_db.get() {
@@ -339,6 +361,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                             if let Some(current_rec) = spools_db.records.borrow().get(spool_id) {
                                 // get the record, should exist if got here, if not fatal error
                                 existing_record_current_weight = current_rec.data.weight_current;
+                                existing_record_current_note = current_rec.data.note.clone();
                                 use_spool_id = current_rec.data.id.clone();
                             } else {
                                 error!("Fatal Error: Internal error in tag_id to spool_id mapping, tag exist but not found");
@@ -378,6 +401,14 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                             }
                             WeightStoreDirective::ClearCurrentWeight => None,
                         };
+
+                        if tag_id_already_exist {
+                            match fields {
+                                FieldsOverrideDirective::TagOverride => (),
+                                FieldsOverrideDirective::StoreOverride => spool_rec.note = existing_record_current_note,
+                            }
+                        }
+
                         match spools_db.insert(spool_rec).await {
                             Ok(true) => {
                                 info!("Stored tag to spools database");
@@ -458,21 +489,21 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct SpoolRecord {
     pub id: String,
-    pub tag_id: String,                 // 14 (7*2)
-    pub material_type: String,          // 10
-    pub material_subtype: String,       // 10
-    pub color_name: String,             // 10
-    pub color_code: String,             // 8
-    pub note: String,                   // 40
-    pub brand: String,                  // 30
+    pub tag_id: String,           // 14 (7*2)
+    pub material_type: String,    // 10
+    pub material_subtype: String, // 10
+    pub color_name: String,       // 10
+    pub color_code: String,       // 8
+    pub note: String,             // 40
+    pub brand: String,            // 30
     #[serde(deserialize_with = "deserialize_optional")]
     pub weight_advertised: Option<i32>, // 4
     #[serde(deserialize_with = "deserialize_optional")]
-    pub weight_core: Option<i32>,       // 4
+    pub weight_core: Option<i32>, // 4
     #[serde(deserialize_with = "deserialize_optional")]
-    pub weight_new: Option<i32>,        // 4
+    pub weight_new: Option<i32>, // 4
     #[serde(deserialize_with = "deserialize_optional")]
-    pub weight_current: Option<i32>,    // 4
+    pub weight_current: Option<i32>, // 4
 }
 
 impl CsvDbId for SpoolRecord {
@@ -546,6 +577,10 @@ fn decode_from_charset(s: &str, charset: &[u8]) -> Option<Vec<u8>> {
     }
 
     Some(result)
+}
+
+fn tag_id_hex(tag_id: &[u8]) -> String {
+    hex::encode_upper(tag_id)
 }
 
 fn tag_file_path(tag_id: &[u8]) -> Result<String, InternalError> {
