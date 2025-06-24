@@ -31,6 +31,19 @@ where
     }
 }
 
+#[allow(dead_code)]
+pub fn deserialize_optional_unit<'de, D>(deserializer: D) -> Result<Option<()>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = String::deserialize(deserializer)?;
+    if s.trim().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(()))
+    }
+}
+
 #[derive(Snafu)]
 pub enum CsvDbError {
     #[snafu(display("Failed to open volume"))]

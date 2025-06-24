@@ -305,7 +305,11 @@ impl AppWithStateBuilder for NestedAppBuilder {
                         color_code: add_spool.rgba,
                         note: add_spool.note,
                         brand: add_spool.brand,
-                        weight_advertised: if add_spool.label_weight == 0 { None } else { Some(add_spool.label_weight) },
+                        weight_advertised: if add_spool.label_weight == 0 {
+                            None
+                        } else {
+                            Some(add_spool.label_weight)
+                        },
                         weight_core: if add_spool.core_weight == 0 { None } else { Some(add_spool.core_weight) },
                         weight_new: None,
                         weight_current: None,
@@ -339,7 +343,6 @@ impl AppWithStateBuilder for NestedAppBuilder {
                                 err.to_string()
                             }
                         }
-
                     }
                 },
             ),

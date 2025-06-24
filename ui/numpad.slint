@@ -1,4 +1,4 @@
-import { MyButton } from "framework/widgets.slint";
+import { MyButton, MyText } from "framework/widgets.slint";
 
 
 export component Display inherits Rectangle {
@@ -6,16 +6,26 @@ export component Display inherits Rectangle {
     padding-right: 40px;
     border-color: black;
     border-width: 1px;
+    in-out property <string> postfix: " g";
+    in-out property <string> display-error: "";
 
     HorizontalLayout {
         padding-right: 20px;
+        padding-left: 10px;
+        Rectangle {
+          MyText {
+            text: display-error;
+            color: red;
+          }
+        }
         VerticalLayout {
+            horizontal-stretch:1;
             padding: 4px;
             alignment: center;
             Text {
                 // preferred-height: 1px;
                 min-height: 0px;
-                text: "\{number} g";
+                text: "\{number}\{postfix}";
                 font-size: 32px;
                 horizontal-alignment: right;
             }
@@ -43,18 +53,24 @@ export component NumPad inherits Rectangle {
     in property <string> title;
     background: white;
     in-out property <int> number;
+    in-out property <string> display-postfix: " g";
+    in-out property <string> display-error;
     function pressed-digit(digit: int) {
         if log(number, 10) < max-digits - 1 {
           number = number * 10 + digit;
+          display-error = "";
         }
     }
     main := VerticalLayout {
         Display {
-            height: root.height / 5;
+            height: root.height/5;
+            postfix: display-postfix;
             number: root.number;
+            display-error: display-error;
         }
 
         HorizontalLayout {
+            vertical-stretch:1;
             NumButton {
                 digit: 7;
                 pressed(digit) => {
@@ -128,6 +144,7 @@ export component NumPad inherits Rectangle {
                 text: "Del";
                 pressed(digit) => {
                     root.number = floor(root.number / 10);
+                    display-error = "";
                 }
             }
 

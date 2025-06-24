@@ -3,7 +3,7 @@ import { ListView, GridBox, VerticalBox, HorizontalBox, Button, ComboBox, SpinBo
 import { FrameworkBackend, FrameworkState, OtaState, WebConfigState } from "framework/framework.slint";
 import { Terminal } from "framework/terminal.slint";
 import { Settings } from "framework/settings.slint";
-import { Title, MyText } from "framework/widgets.slint";
+import { Title, MyText, MyButton } from "framework/widgets.slint";
 
 import { Utils } from "utils.slint";
 import { Trays } from "trays.slint";
@@ -15,6 +15,8 @@ import { NumPad } from "numpad.slint";
 import { SpoolCoreWeight } from "core-weight.slint";
 import { FilamentInfo } from "filament-info.slint";
 import { FilamentInfoMode } from "app.slint";
+import { SelectInventoryId } from "select-inventory-id.slint";
+import { SelectInventoryId } from "select-inventory-id.slint";
 
 // reexport to rust
 
@@ -149,6 +151,9 @@ export component AppWindow inherits Window {
         visible: AppState.encoding-spool-core-visible;
         height: root.height;
     }
+
+    if AppState.control-state == ControlState.EncodeEditing && AppState.encoding-select-spool-id: select-spool-id := SelectInventoryId {}
+
     if AppState.control-state == ControlState.FilamentInformation: filament-information := FilamentInfo {
         mode: FilamentInfoMode.View;
         height: root.height;

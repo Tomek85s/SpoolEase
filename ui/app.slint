@@ -27,6 +27,7 @@ export struct UiTray {
 }
 
 export struct UiSpoolInfo {
+  id: string,
   color: color,
   material: string,
   k: string,
@@ -35,6 +36,7 @@ export struct UiSpoolInfo {
 
 export struct EncodeRequest { // EncodeRequest is actually used for FilamentInfo - for Encode as well as View
   // autofilled
+  id: string,
   tray-index: int,
   tray-id: int, // from index
   weight-advertised: int, 
@@ -109,7 +111,8 @@ export enum SpoolStagingState {
   Empty,
   Scanned,
   Encoded,
-  Unloaded
+  Unloaded,
+  Unchanged,
 }
 
 // Functions to call rust
@@ -129,12 +132,14 @@ export global AppBackend {
     pure callback get-available-scales-info() -> [string];
     callback encode-web-app();
     callback calc-encode-request-display(mode: FilamentInfoMode);
+    callback fill-encode-request-from-spool-id(spool-id: string) -> string;
 }
 
 export global AppState {
     in-out property <bool> select-printer: false;
     in-out property <ControlState> control-state: ControlState.Booting;
     in-out property <bool> encoding-spool-core-visible: false;
+    in-out property <bool> encoding-select-spool-id: false;
     changed control-state => {
         self.stop-highlight-trays();
     }
@@ -246,9 +251,11 @@ export global AppState {
     }
 
     public function update-spool-staging(ui-spool-info: UiSpoolInfo, state: SpoolStagingState) {
-        self.spool-staging-state = state;
         self.spool-staging-info = ui-spool-info;
-        start-highlight-tray(999);
+        if state != SpoolStagingState.Unchanged {
+            self.spool-staging-state = state;
+            start-highlight-tray(999);
+        }
     }
 
     public function empty-spool-staging() {
@@ -303,7 +310,7 @@ export global AppState {
 
     public function show-filament-information(tray-index: int) {
         self.curr-encode-request.tray-index = tray-index;
-        self.curr-encode-request.tray-id = ( (tray-index == 999) ? 999 : self.trays-state[tray-index].id); 
+        self.curr-encode-request.tray-id = ((tray-index == 999) ? 999 : self.trays-state[tray-index].id);
         self.control-state = ControlState.FilamentInformation;
     }
     public function end-show-filament-information() {
@@ -313,7 +320,7 @@ export global AppState {
 
     public function encode-select-tray(tray-index: int) {
         self.curr-encode-request.tray-index = tray-index;
-        self.curr-encode-request.tray-id = ( (tray-index == 999) ? 999 : self.trays-state[tray-index].id); 
+        self.curr-encode-request.tray-id = ((tray-index == 999) ? 999 : self.trays-state[tray-index].id);
         self.control-state = ControlState.EncodeEditing;
         if self.spool-scale-state == SpoolScaleState.Loaded {
             self.encoding-spool-core-visible = true;
@@ -329,6 +336,7 @@ export global AppState {
     }
 
     public function clear-curr-encoding-request() {
+        self.curr-encode-request.id = "";
         self.curr-encode-request.weight-advertised = 0;
         self.curr-encode-request.weight-core = 0;
         self.curr-encode-request.weight-new = 0;
@@ -359,16 +367,16 @@ export global AppState {
         self.encode-timeout = AppBackend.encode-tag(self.curr-encode-request);
         if self.encode-timeout != 0 { // return value of 0 means there was an error, error will be reported separately
               AppState.start-highlight-tray-forever(self.curr-encode-request.tray-id);
-              self.control-state = ControlState.Encoding;
-              user-message = "Place Spool Tag\nto Encode";
-              user-message-type = StatusType.Normal;
+            self.control-state = ControlState.Encoding;
+            user-message = "Place Spool Tag\nto Encode";
+            user-message-type = StatusType.Normal;
         }
         clear-curr-encoding-request();
     }
 
     public function show-spoolscale-dialog(message: string, type: StatusType) {
-      self.spool-inventory-dialog-message = message;
-      self.spool-inventory-dialog-type = type;
+        self.spool-inventory-dialog-message = message;
+        self.spool-inventory-dialog-type = type;
     }
 
     public function spool-scale-connected() {
@@ -398,15 +406,14 @@ export global AppState {
         if AppState.control-state == ControlState.EncodeEditing {
             AppState.encoding-spool-core-visible = true;
             // if loaded while Encode Editing
-        }
-        else if AppState.control-state == ControlState.Encoding {
+        } else if AppState.control-state == ControlState.Encoding {
             // if started with simple encoding, and then loaded a spool on the scale
             // interpret this as forgot to encode also weight
             AppState.control-state = ControlState.EncodeEditing;
             // AppState.stop-highlight-tray();
             AppState.encoding-spool-core-visible = true;
             AppBackend.encode-web-app();
-        } 
+        }
     }
 
     public function spool-scale-load-changed(weight: int, stable: bool) {

@@ -14,6 +14,7 @@ use embassy_net::Stack;
 use embassy_time::Timer;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use hashbrown::HashMap;
+use serde::{Deserialize, Serialize};
 use slint::{ComponentHandle, Model, SharedString, ToSharedString};
 
 use framework::prelude::*;
@@ -60,6 +61,12 @@ pub struct ViewModel {
     spools_cores_weights: HashMap<i32, i32>,
     spools_cores_filter: String,
     pub store: Rc<Store>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct EncodeCookie {
+    scale_weight: ScaleWeight,
+    spool_id: String,
 }
 
 impl ViewModel {
@@ -696,8 +703,11 @@ impl ViewModel {
                 )
             };
             if let Some(descriptor) = descriptor_res {
-                let scale_weight = moved_spool_scale.borrow().weight;
-                let cookie = serde_json::to_string(&scale_weight).unwrap_or_default();
+                let encode_cookie = EncodeCookie {
+                    scale_weight: moved_spool_scale.borrow().weight,
+                    spool_id: encode_request.id.into(),
+                };
+                let cookie = serde_json::to_string(&encode_cookie).unwrap_or_default();
                 spool_tag.write_tag(descriptor, tray_id, cookie);
             }
             info!("Sent the write request of tray {}", tray_id);
@@ -714,6 +724,44 @@ impl ViewModel {
         });
 
         // handle encoding related listener(s) - this depends on current printer
+
+        let moved_ui = self.ui_weak.clone();
+        let moved_store = self.store.clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
+            .on_fill_encode_request_from_spool_id(move |spool_id| {
+                let moved_ui = moved_ui.unwrap();
+                let ui_app_state = moved_ui.global::<crate::app::AppState>();
+                let mut encode_request = ui_app_state.get_curr_encode_request();
+                let encode_request_display = ui_app_state.get_curr_encode_request_display();
+                if let Some(spool_rec) = moved_store.get_spool_by_id(spool_id.as_str()) {
+                    if spool_rec.tag_id.is_empty() {
+                        if spool_rec.material_type.as_str() == encode_request_display.filament_type.as_str() {
+                            encode_request.id = spool_id;
+                            if let Some(weight_advertised) = spool_rec.weight_advertised {
+                                encode_request.weight_advertised = weight_advertised;
+                            }
+                            if let Some(weight_core) = spool_rec.weight_core {
+                                encode_request.weight_core = weight_core;
+                            }
+                            encode_request.brand = spool_rec.brand.to_shared_string();
+                            encode_request.filament_subtype = spool_rec.material_subtype.to_shared_string();
+                            encode_request.color_name = spool_rec.color_name.to_shared_string();
+                            encode_request.note = spool_rec.note.to_shared_string();
+                            ui_app_state.set_curr_encode_request(encode_request);
+                            "".to_shared_string()
+                        } else {
+                            "Material Mismatch".to_shared_string()
+                        }
+                    } else {
+                        "Already Tagged".to_shared_string()
+                    }
+                } else {
+                    "ID Not Found".to_shared_string()
+                }
+            });
+
         let moved_ui = self.ui_weak.clone();
         let moved_staging = self.filament_staging.clone();
         let moved_bambu = self.bambu_printer_model.clone();
@@ -783,6 +831,16 @@ impl ViewModel {
                         (None, &None)
                     }
                 };
+
+                // Case when tag used already contains id
+                if let Some(tag_info) = tag_info {
+                    if let Some(id) = &tag_info.id {
+                        encode_request.id = id.to_shared_string();
+                    }
+                }
+
+                // Case when id was selected (differently) from UI
+                // In such case need to fetch from store the data and fill it in
 
                 if let Some(filament_info) = filament_info {
                     let first_request_to_display = encode_request_display.filament_type.is_empty(); // checking tray_type is empty to know if it is the first time, later if user changes to empty some value it shouldn't be overriden
@@ -902,6 +960,7 @@ impl ViewModel {
             }
         }
         let ui_spool_info = crate::app::UiSpoolInfo {
+            id: tag_info.id.clone().unwrap_or_default().to_shared_string(),
             color: slint::Color::from_argb_encoded(color),
             k: SharedString::from(final_k),
             material: filament_info.tray_type.to_shared_string(),
@@ -1058,7 +1117,6 @@ impl BambuPrinterObserver for ViewModel {
             }
         }
 
-
         // Unloaded spool case - load tag if exist on that spool to staging (for weighting)
         if let Some(removed_tag) = removed_tags.iter().next() {
             let mut filament_staging = self.filament_staging.borrow_mut();
@@ -1114,7 +1172,10 @@ impl SpoolTagObserver for ViewModel {
                 let ams_id = ams_id as i32;
                 let tray_id = tray_id as i32;
 
-                if let Ok(tag_info) = TagInformation::from_descriptor(encoded_descriptor) {
+                if let (Ok(tag_info), Ok(encode_cooke)) = (
+                    TagInformation::from_descriptor(encoded_descriptor),
+                    serde_json::from_str::<EncodeCookie>(cookie),
+                ) {
                     let tag_info_clone = if self.store.is_available() { Some(tag_info.clone()) } else { None };
                     if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info(&tag_info) {
                         self.filament_staging.borrow_mut().set_tag_info(tag_info, StagingOrigin::Encoded);
@@ -1127,20 +1188,26 @@ impl SpoolTagObserver for ViewModel {
                             .global::<crate::app::AppState>()
                             .invoke_encoding_failed(SharedString::from("Descriptor Generation Error"));
                     }
-                    if let Some(tag_info) = tag_info_clone {
+                    if let Some(mut tag_info) = tag_info_clone {
                         let mut weight_directive = WeightStoreDirective::UseStoreCurrentWeight;
-                        if let Ok(ScaleWeight::Stable(stable_weight)) = serde_json::from_str(cookie) {
+                        if let ScaleWeight::Stable(stable_weight) = encode_cooke.scale_weight {
                             if stable_weight != 0 {
                                 // The threshold is set in SpoolEase Scale as const 5g
                                 weight_directive = WeightStoreDirective::ProvidedCurrentWeight(stable_weight);
                             }
+                        }
+                        if !encode_cooke.spool_id.is_empty() {
+                            tag_info.id = Some(encode_cooke.spool_id);
                         }
                         if let Err(err) = self.store.try_send_op(StoreOp::WriteTag {
                             tag_info,
                             tag_file: TagFileDirective::AlwaysWrite,
                             weight: weight_directive,
                             fields: FieldsOverrideDirective::TagOverride, // when encoding, the encode data should overide conflicting fields
-                            cookie: Box::new(StoreWriteTagCookie { notify_scale: false }),
+                            cookie: Box::new(StoreWriteTagCookie {
+                                notify_scale: false,
+                                store_request_origin: StoreRequestOrigin::Encode,
+                            }),
                         }) {
                             info!("Error writing tag to store : {}", err);
                         }
@@ -1164,7 +1231,10 @@ impl SpoolTagObserver for ViewModel {
                             tag_file: TagFileDirective::WriteIfMissing,
                             weight: WeightStoreDirective::UseStoreCurrentWeight,
                             fields: FieldsOverrideDirective::StoreOverride, // when scanning, the store should overide conflicting fields
-                            cookie: Box::new(StoreWriteTagCookie { notify_scale: false }),
+                            cookie: Box::new(StoreWriteTagCookie {
+                                notify_scale: false,
+                                store_request_origin: StoreRequestOrigin::Scan,
+                            }),
                         }) {
                             info!("Error writing tag to store : {}", err);
                         }
@@ -1422,7 +1492,10 @@ impl SpoolScaleObserver for ViewModel {
                         tag_file: TagFileDirective::WriteIfMissing,
                         weight: WeightStoreDirective::ProvidedCurrentWeight(weight),
                         fields: FieldsOverrideDirective::StoreOverride,
-                        cookie: Box::new(StoreWriteTagCookie { notify_scale: true }),
+                        cookie: Box::new(StoreWriteTagCookie {
+                            notify_scale: true,
+                            store_request_origin: StoreRequestOrigin::UpdateWeight,
+                        }),
                     }) {
                         info!("Error writing tag to store : {}", err);
                         ui_app_state.invoke_show_spoolscale_dialog(
@@ -1466,30 +1539,55 @@ impl SpoolScaleObserver for ViewModel {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum StoreRequestOrigin {
+    Scan,
+    Encode,
+    UpdateWeight,
+}
+
 #[derive(Clone, Debug)]
 struct StoreWriteTagCookie {
     notify_scale: bool,
+    store_request_origin: StoreRequestOrigin,
 }
+
 impl Cookie for StoreWriteTagCookie {}
 
 impl StoreObserver for ViewModel {
-    fn on_tag_stored(&mut self, result: Result<(), String>, cookie: Box<dyn AnyClone>) {
+    fn on_tag_stored(&mut self, result: Result<String, String>, cookie: Box<dyn AnyClone>) {
         if let Ok(cookie) = cookie.into_any().downcast::<StoreWriteTagCookie>() {
             let ui = self.ui_weak.unwrap();
             let ui_app_state = ui.global::<crate::app::AppState>();
-            // on success we update only if came as request to store weight from scale
-            if cookie.notify_scale {
-                self.spool_scale_model.borrow().button_response(result.is_ok());
-                if result.is_ok() {
-                    ui_app_state.invoke_show_spoolscale_dialog("Updated Filament Weight".to_shared_string(), crate::app::StatusType::Success);
-                }
-            }
             // on error we update on any failure to store using same message - for consistency
-            if let Err(err) = result {
-                ui_app_state.invoke_show_spoolscale_dialog(
-                    format!("Failed to Update Filament Weight/Tag\n\n{err}").to_shared_string(),
-                    crate::app::StatusType::Error,
-                );
+            match result {
+                Ok(id) => {
+                    if [StoreRequestOrigin::Scan, StoreRequestOrigin::Encode].contains(&cookie.store_request_origin) {
+                        if let Some(ref mut tag_info) = self.filament_staging.borrow_mut().tag_info_mut() {
+                            tag_info.id = Some(id.clone());
+                            let ui = self.ui_weak.clone();
+                            if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info(tag_info) {
+                                ui.unwrap()
+                                    .global::<crate::app::AppState>()
+                                    .invoke_update_spool_staging(ui_spool_info, crate::app::SpoolStagingState::Unchanged);
+                            }
+                        }
+                    }
+                    if cookie.notify_scale {
+                        self.spool_scale_model.borrow().button_response(true);
+                        ui_app_state.invoke_show_spoolscale_dialog("Updated Filament Weight".to_shared_string(), crate::app::StatusType::Success);
+                    }
+                }
+                Err(err) => {
+                    if cookie.notify_scale {
+                        self.spool_scale_model.borrow().button_response(false);
+                    }
+                    // We use the same UI style message on any error writing to store for consistency, so it's not really 'spoolscale' dialog
+                    ui_app_state.invoke_show_spoolscale_dialog(
+                        format!("Failed to Update Filament Weight/Tag\n\n{err}").to_shared_string(),
+                        crate::app::StatusType::Error,
+                    );
+                }
             }
         }
     }

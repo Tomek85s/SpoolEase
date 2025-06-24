@@ -24,18 +24,22 @@ export component LabeledText inherits Rectangle {
             color: text-color;
         }
     }
+
     if label-button: MyButton {
         z: -1;
         x: thelabel.x - 4px;
         y: thelabel.y - 4px;
-        width: thelabel.width -1px; // for spacing of 5px (4+1) out of the 10px between elements
+        width: thelabel.width - 1px; // for spacing of 5px (4+1) out of the 10px between elements
         height: thelabel.height + 8px;
-        clicked => { root.clicked(); }
+        clicked => {
+            root.clicked();
+        }
     }
 }
 
 export component LabeledInfo inherits LabeledText {
     utils := Utils { }
+
     label-width: 90px;
 }
 
@@ -52,8 +56,9 @@ export component ViewTitle inherits Title {
 
 export component EncodeButtons inherits HorizontalLayout {
     Window {
-      horizontal-stretch: 1;
+        horizontal-stretch: 1;
     }
+
     MyButton {
         horizontal-stretch: 1;
         height: 56px;
@@ -92,11 +97,42 @@ export component FilamentInfo inherits Rectangle {
     background: white;
     property <color> filament-color: AppState.curr-encode-request.tray-index == 999 ? AppState.spool-staging-info.color : AppState.trays-state[AppState.curr-encode-request.tray-index].filament.color;
     utils := Utils { }
+
     VerticalLayout {
         alignment: stretch;
 
-        if mode == FilamentInfoMode.Encode: EncodeTitle { background: filament-color; text-color: utils.contrasting_color(filament-color); }
-        if mode == FilamentInfoMode.View: ViewTitle { background: filament-color; text-color: utils.contrasting_color(filament-color); }
+        if mode == FilamentInfoMode.Encode: HorizontalLayout {
+            MyButton {
+                width: 80px;
+                text: AppState.curr-encode-request.id != "" ? AppState.curr-encode-request.id : "Use ID";
+                clicked => {
+                    AppState.encoding-select-spool-id = true;
+                  }
+            }
+
+            EncodeTitle {
+                background: filament-color;
+                text-color: utils.contrasting_color(filament-color);
+            }
+        }
+
+        if mode == FilamentInfoMode.View: HorizontalLayout {
+            Rectangle {
+                width: 80px;
+                background: filament-color;
+                border-color: black;
+                border-width: 1px;
+                MyText {
+                    color: utils.contrasting_color(filament-color);
+                    text: AppState.curr-encode-request.id != "" ? AppState.curr-encode-request.id : "-";
+                }
+            }
+
+            ViewTitle {
+                background: filament-color;
+                text-color: utils.contrasting_color(filament-color);
+            }
+        }
 
         VerticalLayout {
             alignment: stretch;
@@ -164,18 +200,18 @@ export component FilamentInfo inherits Rectangle {
                         label-button: mode == FilamentInfoMode.Encode;
                         property <string> core: AppState.curr-encode-request.weight-core != 0 ? "\{AppState.curr-encode-request.weight-core}g" : "—";
                         property <string> new: AppState.curr-encode-request.weight-new != 0 ? "\{AppState.curr-encode-request.weight-new}g" : "—";
-                        property <string> advertised: AppState.curr-encode-request.weight-advertised == 0 ? "—" : ((AppState.curr-encode-request.weight-advertised > 500) && (Math.mod(AppState.curr-encode-request.weight-advertised,500)) == 0) ? "\{AppState.curr-encode-request.weight-advertised/1000}kg" : "\{AppState.curr-encode-request.weight-advertised}g";
+                        property <string> advertised: AppState.curr-encode-request.weight-advertised == 0 ? "—" : ((AppState.curr-encode-request.weight-advertised > 500) && (Math.mod(AppState.curr-encode-request.weight-advertised,500)) == 0) ? "\{AppState.curr-encode-request.weight-advertised / 1000}kg" : "\{AppState.curr-encode-request.weight-advertised}g";
                         label: "Weights:";
                         text: "\{advertised} (Label) / \{core} (Core) / \{new} (New)";
                         clicked => {
-                           AppState.encoding-spool-core-visible = true;
+                            AppState.encoding-spool-core-visible = true;
                         }
                     }
                 }
             }
         }
 
-        if mode == FilamentInfoMode.Encode: EncodeButtons {}
-        if mode == FilamentInfoMode.View: ViewButtons {}
+        if mode == FilamentInfoMode.Encode: EncodeButtons { }
+        if mode == FilamentInfoMode.View: ViewButtons { }
     }
 }

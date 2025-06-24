@@ -33,6 +33,10 @@ impl FilamentStaging {
     pub fn tag_info(&self) -> &Option<TagInformation> {
         &self.tag_info
     }
+    pub fn tag_info_mut(&mut self) -> &mut Option<TagInformation> {
+        &mut self.tag_info
+    }
+
     pub fn set_tag_info(&mut self, mut tag_info: TagInformation, origin: StagingOrigin) {
         // if loaded in scanning scenario or unloading scenario, the store should reflect some of the fields
         if [StagingOrigin::Scanned, StagingOrigin::Unloaded].contains(&origin) {

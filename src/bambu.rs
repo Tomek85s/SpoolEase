@@ -1833,6 +1833,7 @@ pub async fn bambu_mqtt_task(
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct TagInformation {
+    pub id: Option<String>,
     pub origin_descriptor: String,
     pub tag_id: Option<Vec<u8>>,
     pub filament: Option<FilamentInfo>,
@@ -2092,6 +2093,7 @@ impl TagInformation {
 
         if v && id && m && fi && c && nn && nx {
             Ok(Self {
+                id: None,
                 origin_descriptor: descriptor.to_string(),
                 tag_id,
                 filament: Some(filament_info_result),
