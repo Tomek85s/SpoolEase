@@ -95,7 +95,8 @@ export component FilamentInfo inherits Rectangle {
     width: 480px;
     height: 320px;
     background: white;
-    property <color> filament-color: AppState.curr-encode-request.tray-index == 999 ? AppState.spool-staging-info.color : AppState.trays-state[AppState.curr-encode-request.tray-index].filament.color;
+    // property <color> filament-color: mode == FilamentInfoMode.View ? (AppState.curr-encode-request.tray-index == 999 ? AppState.spool-staging-info.color : AppState.trays-state[AppState.curr-encode-request.tray-index].filament.color) :
+    property <color> filament-color: AppState.curr-encode-request-display.title-color;
     utils := Utils { }
 
     VerticalLayout {
@@ -107,7 +108,7 @@ export component FilamentInfo inherits Rectangle {
                 text: AppState.curr-encode-request.id != "" ? AppState.curr-encode-request.id : "Use ID";
                 clicked => {
                     AppState.encoding-select-spool-id = true;
-                  }
+                }
             }
 
             EncodeTitle {

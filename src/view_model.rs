@@ -24,7 +24,7 @@ use framework::{
 };
 
 use crate::app_config::{BASE_FILAMENTS, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
-use crate::bambu::TrayBits;
+use crate::bambu::{FilamentInfo, TrayBits};
 use crate::color_utils::get_color_name;
 use crate::filament_staging::{self, StagingOrigin};
 use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
@@ -61,6 +61,7 @@ pub struct ViewModel {
     spools_cores_weights: HashMap<i32, i32>,
     spools_cores_filter: String,
     pub store: Rc<Store>,
+    encode_from_blank: Option<TagInformation>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -129,6 +130,7 @@ impl ViewModel {
             spools_cores_weights,
             spools_cores_filter: String::new(),
             store,
+            encode_from_blank: None,
         };
         let view_model_rc = Rc::new(RefCell::new(view_model));
 
@@ -670,6 +672,10 @@ impl ViewModel {
                 } else {
                     return 0; // signals an error, UI will not continue
                 }
+            } else if tray_id == 998 {
+                // Encode from blank, manual data only
+                let tag_info = moved_view_model.borrow_mut().encode_from_blank.take();
+                tag_info.unwrap() // when we get here this should always pass
             } else {
                 match moved_bambu_printer.borrow().get_tag_info_to_encode(tray_id) {
                     Ok(tag_info) => tag_info,
@@ -694,7 +700,7 @@ impl ViewModel {
             tag_info_to_encode.note = (!encode_request.note.trim().is_empty()).then(|| encode_request.note.trim().to_string());
 
             let bambu_printer_borrow = moved_bambu_printer.borrow();
-            let descriptor_res = if tray_id == 999 {
+            let descriptor_res = if tray_id == 999 || tray_id == 998 {
                 &tag_info_to_encode.to_descriptor(None, None)
             } else {
                 &tag_info_to_encode.to_descriptor(
@@ -727,6 +733,7 @@ impl ViewModel {
 
         let moved_ui = self.ui_weak.clone();
         let moved_store = self.store.clone();
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
         self.ui_weak
             .unwrap()
             .global::<crate::app::AppBackend>()
@@ -736,8 +743,9 @@ impl ViewModel {
                 let mut encode_request = ui_app_state.get_curr_encode_request();
                 let encode_request_display = ui_app_state.get_curr_encode_request_display();
                 if let Some(spool_rec) = moved_store.get_spool_by_id(spool_id.as_str()) {
+                    let from_blank_request = encode_request.tray_index == 998;
                     if spool_rec.tag_id.is_empty() {
-                        if spool_rec.material_type.as_str() == encode_request_display.filament_type.as_str() {
+                        if spool_rec.material_type.as_str() == encode_request_display.filament_type.as_str() || from_blank_request {
                             encode_request.id = spool_id;
                             if let Some(weight_advertised) = spool_rec.weight_advertised {
                                 encode_request.weight_advertised = weight_advertised;
@@ -749,6 +757,25 @@ impl ViewModel {
                             encode_request.filament_subtype = spool_rec.material_subtype.to_shared_string();
                             encode_request.color_name = spool_rec.color_name.to_shared_string();
                             encode_request.note = spool_rec.note.to_shared_string();
+
+                            if encode_request.tray_index == 998 {
+                                let mut view_model_borrow = moved_view_model.borrow_mut();
+                                if view_model_borrow.encode_from_blank.is_none() {
+                                    let blank_tag_info = TagInformation {
+                                        filament: Some(FilamentInfo::new()),
+                                        ..Default::default()
+                                    };
+                                    view_model_borrow.encode_from_blank = Some(blank_tag_info);
+                                }
+                                if from_blank_request {
+                                    let filament_info = view_model_borrow.encode_from_blank.as_mut().unwrap().filament.as_mut().unwrap();
+                                    filament_info.tray_type = spool_rec.material_type;
+                                    filament_info.tray_color = spool_rec.color_code;
+                                    filament_info.nozzle_temp_min = 0; // Real values will be used when based on tray_type (material) when needed
+                                    filament_info.nozzle_temp_max = 0; // Real values will be used when based on tray_type (material) when needed
+                                    filament_info.tray_info_idx = String::new(); // Real values will be used when based on tray_type (material) when needed
+                                }
+                            }
                             ui_app_state.set_curr_encode_request(encode_request);
                             "".to_shared_string()
                         } else {
@@ -762,6 +789,10 @@ impl ViewModel {
                 }
             });
 
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak.unwrap().global::<crate::app::AppBackend>().on_notify_post_encode(move || {
+            moved_view_model.borrow_mut().encode_from_blank = None;
+        });
         let moved_ui = self.ui_weak.clone();
         let moved_staging = self.filament_staging.clone();
         let moved_bambu = self.bambu_printer_model.clone();
@@ -785,9 +816,13 @@ impl ViewModel {
                         // Special case to avoid a call after encode_request is cleared
                         return;
                     }
-                    999 => {
-                        // Staging
-                        if let Some(tag_info) = staging_borrow.tag_info() {
+                    999 | 998 => {
+                        let tag_info_source = if tray_id == 999 {
+                            staging_borrow.tag_info()
+                        } else {
+                            &moved_view_model.borrow().encode_from_blank
+                        };
+                        if let Some(tag_info) = tag_info_source {
                             if let Some(filament_info) = &tag_info.filament {
                                 if let Some((nozzle_diameter, calibration)) = &tag_info.calibrations.iter().next() {
                                     encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name).into();
@@ -880,7 +915,9 @@ impl ViewModel {
                         }
                     }
 
-                    encode_request_display.color_code = filament_info.tray_color[..filament_info.tray_color.len().min(6)].into();
+                    encode_request_display.color_code = filament_info.tray_color[..filament_info.tray_color.len().min(8)].into();
+                    let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+                    encode_request_display.title_color = slint::Color::from_argb_encoded(color);
                     encode_request_display.temp_min = filament_info.nozzle_temp_min.try_into().unwrap_or_default();
                     encode_request_display.temp_max = filament_info.nozzle_temp_max.try_into().unwrap_or_default();
                     encode_request_display.filament_type = filament_info.tray_type.into();

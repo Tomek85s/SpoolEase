@@ -2,7 +2,9 @@
 // Deal with when to clear tag information, when we know spool taken out
 // Deal with when to copy tag information between trays if only some data change but we know the spool is there
 use crate::{
-    app_config::PrinterConfig, settings::MAX_NUM_PRINTERS, ssdp::{SSDPInfo, SSDPPubSubChannel}
+    app_config::{PrinterConfig, MATERIALS},
+    settings::MAX_NUM_PRINTERS,
+    ssdp::{SSDPInfo, SSDPPubSubChannel},
 };
 use alloc::{
     borrow::Cow,
@@ -85,7 +87,13 @@ pub struct BambuPrinter {
 }
 
 pub trait BambuPrinterObserver {
-    fn on_trays_update(&mut self, bambu_printer: &mut BambuPrinter, prev_tray_bits: &TrayBits, new_tray_bits: &TrayBits, removed_tags: &HashMap<usize, TagInformation>);
+    fn on_trays_update(
+        &mut self,
+        bambu_printer: &mut BambuPrinter,
+        prev_tray_bits: &TrayBits,
+        new_tray_bits: &TrayBits,
+        removed_tags: &HashMap<usize, TagInformation>,
+    );
     fn on_printer_connect_status(&self, bambu_printer: &mut BambuPrinter, status: bool);
 }
 
@@ -142,20 +150,23 @@ impl BambuPrinter {
         }
     }
     pub fn nozzle_diameter(&self) -> &Option<String> {
-        &self.inner_nozzle_diameter 
+        &self.inner_nozzle_diameter
     }
     pub fn set_nozzle_diameter(&mut self, new_nozzle_diameter: Option<String>) {
         if new_nozzle_diameter != self.inner_nozzle_diameter {
-            info!("[{}] Nozzle diameter changed from {:?} to {:?}", self.printer_number, self.inner_nozzle_diameter, new_nozzle_diameter);
+            info!(
+                "[{}] Nozzle diameter changed from {:?} to {:?}",
+                self.printer_number, self.inner_nozzle_diameter, new_nozzle_diameter
+            );
             self.inner_nozzle_diameter = new_nozzle_diameter;
             self.nozzle_diameter_dirty = true;
         }
     }
 
     pub fn init_printer_persistent_state(&mut self, state: PrinterPersistentState) {
-       self.inner_ams_trays = state.ams_trays.into_owned();
-       self.inner_virt_tray = state.virt_tray.into_owned();
-       self.inner_nozzle_diameter = state.nozzle_diameter;
+        self.inner_ams_trays = state.ams_trays.into_owned();
+        self.inner_virt_tray = state.virt_tray.into_owned();
+        self.inner_nozzle_diameter = state.nozzle_diameter;
     }
 
     pub async fn load_printer_state(framework: &Rc<RefCell<Framework>>, printer: &Rc<RefCell<BambuPrinter>>) {
@@ -164,17 +175,15 @@ impl BambuPrinter {
         let file_store = framework.borrow().file_store();
         let mut file_store = file_store.lock().await;
         match file_store.read_file_str(&path).await {
-            Ok(state_str) => {
-                match serde_json::from_str::<PrinterPersistentState>(&state_str) {
-                    Ok(printer_state) => {
-                        printer.borrow_mut().init_printer_persistent_state(printer_state);
-                        term_info!("[{}] Restored printer state from SDCard", printer_number);
-                    }
-                    Err(err) => {
-                        term_error!("[{}] Failed to parse printer state in file {} : {}", printer_number, path, err);
-                    }
+            Ok(state_str) => match serde_json::from_str::<PrinterPersistentState>(&state_str) {
+                Ok(printer_state) => {
+                    printer.borrow_mut().init_printer_persistent_state(printer_state);
+                    term_info!("[{}] Restored printer state from SDCard", printer_number);
                 }
-            }
+                Err(err) => {
+                    term_error!("[{}] Failed to parse printer state in file {} : {}", printer_number, path, err);
+                }
+            },
             Err(err) => {
                 error!("[{printer_number}] Error reading state file {path} : {err}");
             }
@@ -193,7 +202,10 @@ impl BambuPrinter {
             let ams_trays_dirty = printer_borrow.ams_trays_dirty.iter().any(|&v| v);
 
             if ams_trays_dirty || printer_borrow.virty_tray_dirty || printer_borrow.nozzle_diameter_dirty {
-                debug!("[{}] Dirty status: AMS slots({}), Ext slot({}), Nozzle diameter({})", printer_borrow.printer_number, ams_trays_dirty, printer_borrow.virty_tray_dirty, printer_borrow.nozzle_diameter_dirty);
+                debug!(
+                    "[{}] Dirty status: AMS slots({}), Ext slot({}), Nozzle diameter({})",
+                    printer_borrow.printer_number, ams_trays_dirty, printer_borrow.virty_tray_dirty, printer_borrow.nozzle_diameter_dirty
+                );
                 printer_serial = Some(printer_borrow.printer_serial.clone());
                 let printer_state = PrinterPersistentState {
                     ams_trays: Cow::Borrowed(printer_borrow.ams_trays()),
@@ -218,11 +230,13 @@ impl BambuPrinter {
             printer.borrow_mut().nozzle_diameter_dirty = false;
             let mut file_store = file_store.lock().await;
             match file_store.create_write_file_str(&path, &printer_state_str).await {
-                Ok(_) => { }
+                Ok(_) => {}
                 Err(err) => {
                     let mut printer_borrow = printer.borrow_mut();
                     printer_borrow.virty_tray_dirty |= virt_tray_dirty;
-                    for (x, y) in printer_borrow.ams_trays_dirty.iter_mut().zip(&ams_trays_dirty) { *x |= *y };
+                    for (x, y) in printer_borrow.ams_trays_dirty.iter_mut().zip(&ams_trays_dirty) {
+                        *x |= *y
+                    }
                     printer_borrow.nozzle_diameter_dirty |= nozzle_diameter_dirty;
                     error!("[{}] Failed to store printer restart state : {err}", printer_borrow.printer_number);
                 }
@@ -467,7 +481,8 @@ impl BambuPrinter {
                 debug!("[{}] {:?}", self.printer_number, tray_update);
                 return Err("tray_type junk".to_string());
             }
-            if tray_info_idx_update.starts_with("00") { // tray_info_idx CAN end with 00, but not start with 00 afaik
+            if tray_info_idx_update.starts_with("00") {
+                // tray_info_idx CAN end with 00, but not start with 00 afaik
                 // might end with 00, so checking if starts with 00
                 warn!("[{}] ???? tray_info_idx with 00 suffix", self.printer_number);
                 debug!("[{}] {:?}", self.printer_number, tray_update);
@@ -657,7 +672,9 @@ impl BambuPrinter {
         for tray_id in 0..self.ams_trays().len() {
             let spool_removed = if let (Some(prev_tray_exist_bits), Some(new_tray_exist_bits)) = (&prev_tray_exist_bits, &self.tray_exist_bits) {
                 (((prev_tray_exist_bits >> tray_id) & 0x01) != 0) && (((new_tray_exist_bits >> tray_id) & 0x01) == 0)
-            } else { false };
+            } else {
+                false
+            };
             let (ams_id, ams_tray_id) = BambuPrinter::get_ams_and_tray_id(tray_id);
             let ams_id_str = format!("{ams_id}");
             let source_tray = if let Some(amss) = &ams.ams {
@@ -675,19 +692,18 @@ impl BambuPrinter {
             if let Some(mut new_tray) = new_tray {
                 change_made = true;
                 let prev_tray = self.set_ams_tray(tray_id, &mut new_tray);
-                
+
                 if spool_removed {
                     if let Some(prev_tag_info) = prev_tray.tag_info.take() {
                         if self.ams_trays()[tray_id].tag_info.is_none() {
                             // Before there was a tag and spool removed, add it to the list
-                           removed_tags.insert(tray_id, prev_tag_info);
+                            removed_tags.insert(tray_id, prev_tag_info);
                         }
-                    } 
-
+                    }
                 }
             }
         }
-        ( change_made, removed_tags )
+        (change_made, removed_tags)
     }
 
     #[allow(non_snake_case)]
@@ -855,7 +871,7 @@ impl BambuPrinter {
                                 .ok();
                             triggered_k_restore_sequence = true;
                         }
-                    } 
+                    }
                     if !triggered_k_restore_sequence {
                         // no need to restore since trays received are same as should
                         term_info!("[{}] Pressure advance (k) ok at printer startup", self.printer_number);
@@ -863,7 +879,6 @@ impl BambuPrinter {
                     }
                 }
                 change_made = nozzle_diameter_change_made || ams_change_made || vt_tray_change_made;
-
             } else if command == "ams_filament_setting" {
                 change_made = self.process_print_message__ams_filament_setting(print)
             } else if command == "extrusion_cali_set" || command == "extrusion_cali_del" {
@@ -899,9 +914,7 @@ impl BambuPrinter {
         let mut observers = self.observers.clone(); // to avoid two references - can probably optimize in various ways
         for weak_observer in observers.iter_mut() {
             let observer = weak_observer.upgrade().unwrap();
-            observer
-                .borrow_mut()
-                .on_trays_update(self, prev_trays_bits, new_trays_bits, removed_tags);
+            observer.borrow_mut().on_trays_update(self, prev_trays_bits, new_trays_bits, removed_tags);
         }
     }
 
@@ -989,6 +1002,35 @@ impl BambuPrinter {
         BambuPrinter::publish_payload_async(printer_serial, printer_number, log_filter, write_packets, payload).await;
     }
 
+    pub fn fill_filament_defaults_if_needed(&self, filament: &mut FilamentInfo) -> bool {
+        if filament.tray_type.is_empty() {
+            return false;
+        }
+        let mut res = true;
+        if filament.tray_info_idx.is_empty() || filament.nozzle_temp_min == 0 || filament.nozzle_temp_max == 0 {
+            res = false;
+            for (line_index, material_line) in MATERIALS.lines().enumerate() {
+                if line_index == 0 {
+                    continue;
+                } // skip title line
+                let mut split = material_line.split(',');
+                if let Some(material) = split.next() {
+                    if material == filament.tray_type {
+                        if let (Some(filament_id), Some(nozzle_temp_low), Some(nozzle_temp_high)) = (split.next(), split.next(), split.next()) {
+                            if let (Ok(nozzle_temp_low), Ok(nozzle_temp_high)) = (nozzle_temp_low.parse::<u32>(), nozzle_temp_high.parse::<u32>()) {
+                                filament.tray_info_idx = filament_id.to_string();
+                                filament.nozzle_temp_min = nozzle_temp_low;
+                                filament.nozzle_temp_max = nozzle_temp_high;
+                                res = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        res
+    }
+
     pub fn set_tray_filament(&mut self, tray_id: i32, tag_info: &TagInformation) {
         let ams_id: u32;
         let ams_tray_id;
@@ -1010,31 +1052,38 @@ impl BambuPrinter {
         let setting_id = matching_calibration.as_ref().map(|calibration| calibration.setting_id.as_str());
 
         if let Some(filament) = &tag_info.filament {
-            let cmd = crate::bambu_api::AmsFilamentSettingCommand::new(
-                ams_id,
-                ams_tray_id, // here we need the tray_id within the specific ams
-                &filament.tray_info_idx,
-                setting_id,
-                &filament.tray_type,
-                &filament.tray_color,
-                filament.nozzle_temp_min,
-                filament.nozzle_temp_max,
-            );
-            let payload = serde_json::to_string_pretty(&cmd).unwrap();
-            self.publish_payload(payload);
+            let mut filament = filament.clone();
+            let filament_ok_to_send = self.fill_filament_defaults_if_needed(&mut filament);
 
-            let cmd = crate::bambu_api::ExtrusionCaliSelCommand::new(
-                &self.nozzle_diameter().clone().unwrap_or_default(),
-                tray_id,                 // here we need the original tray_id
-                &filament.tray_info_idx, // tray_info_idx is filament_id in this command
-                if let Some(calibration) = &matching_calibration {
-                    Some(calibration.cali_idx)
-                } else {
-                    Some(-1)
-                },
-            );
-            let payload = serde_json::to_string_pretty(&cmd).unwrap();
-            self.publish_payload(payload);
+            if filament_ok_to_send {
+                let cmd = crate::bambu_api::AmsFilamentSettingCommand::new(
+                    ams_id,
+                    ams_tray_id, // here we need the tray_id within the specific ams
+                    &filament.tray_info_idx,
+                    setting_id,
+                    &filament.tray_type,
+                    &filament.tray_color,
+                    filament.nozzle_temp_min,
+                    filament.nozzle_temp_max,
+                );
+                let payload = serde_json::to_string_pretty(&cmd).unwrap();
+                self.publish_payload(payload);
+
+                let cmd = crate::bambu_api::ExtrusionCaliSelCommand::new(
+                    &self.nozzle_diameter().clone().unwrap_or_default(),
+                    tray_id,                 // here we need the original tray_id
+                    &filament.tray_info_idx, // tray_info_idx is filament_id in this command
+                    if let Some(calibration) = &matching_calibration {
+                        Some(calibration.cali_idx)
+                    } else {
+                        Some(-1)
+                    },
+                );
+                let payload = serde_json::to_string_pretty(&cmd).unwrap();
+                self.publish_payload(payload);
+            } else {
+                error!("Bad filament type encountered in tag when setting tray information {tag_info:?}");
+            }
             self.update_any_tray(tray_id as usize, |tray| {
                 tray.tag_info = Some(tag_info.clone());
             });
@@ -1190,7 +1239,8 @@ impl BambuPrinter {
         // let mut tag_info = tray.tag_info.as_ref().unwrap_or(&TagInformation::default()).clone();
 
         let mut tag_info = TagInformation::default();
-        // Take the color from what the use actually sees, potentially different from what is in the tag in that tray
+        // Take the color and other filament information from what the use actually sees, potentially different from what is in the tag in that tray
+        // Could also be the tag doesn't even contain that information if it was generated using inventory only
         if let Filament::Known(filament_info) = &tray.filament {
             tag_info.filament = Some(filament_info.clone());
         } else {
@@ -1662,7 +1712,7 @@ pub async fn incoming_messages_task(
                                         tray_exist_bits: bambu_printer.borrow().tray_exist_bits,
                                     };
                                     if change_made {
-                                            (*bambu_printer.borrow_mut()).update_ams_trays_done(&previous_tray_bits, &updated_tray_bits, &removed_tags);
+                                        (*bambu_printer.borrow_mut()).update_ams_trays_done(&previous_tray_bits, &updated_tray_bits, &removed_tags);
                                     }
                                 }
                             } else if log_level >= log::Level::Debug {
@@ -1876,23 +1926,6 @@ impl TagInformation {
         };
         let k_postfix = if !k_prefix.is_empty() { ")" } else { "" };
 
-        let brand_part = self
-            .brand
-            .as_ref()
-            .map(|s| format!("&B={}", my_encode_to_url_part(s)))
-            .unwrap_or_default();
-        let filament_subtype_part = self
-            .filament_subtype
-            .as_ref()
-            .map(|s| format!("&MS={}", my_encode_to_url_part(s)))
-            .unwrap_or_default();
-        let color_name_part = self
-            .color_name
-            .as_ref()
-            .map(|s| format!("&CN={}", my_encode_to_url_part(s)))
-            .unwrap_or_default();
-        let note_part = self.note.as_ref().map(|s| format!("&N={}", my_encode_to_url_part(s))).unwrap_or_default();
-
         for calibration_kv in self.calibrations.iter() {
             if let Some(cal_nozzle_diameter_char) = calibration_kv.0.chars().nth(2) {
                 let calibration = calibration_kv.1;
@@ -1910,17 +1943,74 @@ impl TagInformation {
         } else {
             format!("{k_prefix}{inner_calibrations_part}{k_postfix}")
         };
-        self.filament.as_ref().map(|filament| format!(
-                "{FILAMENT_URL_PREFIX}V1?ID={TAG_PLACEHOLDER}{}{}{}&M={}&C={}&NN={}&NX={}{brand_part}{filament_subtype_part}{color_name_part}{note_part}&FI={}{calibrations_part}",
-                self.weight_advertised.map(|v| format!("&WA={}", v)).unwrap_or_default(),
-                self.weight_core.map(|v| format!("&WC={}", v)).unwrap_or_default(),
-                self.weight_new.map(|v| format!("&WN={}", v)).unwrap_or_default(),
-                filament.tray_type,
-                filament.tray_color,
-                filament.nozzle_temp_min,
-                filament.nozzle_temp_max,
-                filament.tray_info_idx,
-            ))
+
+        let brand_part = self
+            .brand
+            .as_ref()
+            .map(|s| format!("&B={}", my_encode_to_url_part(s)))
+            .unwrap_or_default();
+        let filament_subtype_part = self
+            .filament_subtype
+            .as_ref()
+            .map(|s| format!("&MS={}", my_encode_to_url_part(s)))
+            .unwrap_or_default();
+        let color_name_part = self
+            .color_name
+            .as_ref()
+            .map(|s| format!("&CN={}", my_encode_to_url_part(s)))
+            .unwrap_or_default();
+        let note_part = self.note.as_ref().map(|s| format!("&N={}", my_encode_to_url_part(s))).unwrap_or_default();
+
+        let mut material_part = String::new();
+        let mut color_part = String::new();
+        let mut nozzle_temp_min_part = String::new();
+        let mut nozzle_temp_max_part = String::new();
+        let mut tray_info_idx_part = String::new();
+
+        if let Some(filament) = &self.filament {
+            material_part = if filament.tray_type.is_empty() {
+                String::new()
+            } else {
+                format!("&M={}", filament.tray_type)
+            };
+            color_part = if filament.tray_color.is_empty() {
+                String::new()
+            } else {
+                format!("&C={}", filament.tray_color)
+            };
+            nozzle_temp_min_part = if filament.nozzle_temp_min == 0 {
+                String::new()
+            } else {
+                format!("&NN={}", filament.nozzle_temp_min)
+            };
+            nozzle_temp_max_part = if filament.nozzle_temp_max == 0 {
+                String::new()
+            } else {
+                format!("&NX={}", filament.nozzle_temp_max)
+            };
+            tray_info_idx_part = if filament.tray_info_idx.is_empty() {
+                String::new()
+            } else {
+                format!("&FI={}", filament.tray_info_idx)
+            };
+        }
+        let advertised_weight_part = self.weight_advertised.map(|v| format!("&WA={}", v)).unwrap_or_default();
+        let weight_core_part = self.weight_core.map(|v| format!("&WC={}", v)).unwrap_or_default();
+        let weight_new_part = self.weight_new.map(|v| format!("&WN={}", v)).unwrap_or_default();
+
+        Some(format!("{FILAMENT_URL_PREFIX}V1?ID={TAG_PLACEHOLDER}{material_part}{filament_subtype_part}{color_part}{color_name_part}{brand_part}{advertised_weight_part}{weight_core_part}{weight_new_part}{nozzle_temp_min_part}{nozzle_temp_max_part}{note_part}{tray_info_idx_part}{calibrations_part}"))
+
+        // self.filament.as_ref().map(|filament| format!(
+        //         "{FILAMENT_URL_PREFIX}V1?ID={TAG_PLACEHOLDER}{}{}{}{material_part}&C={}&NN={}&NX={}{brand_part}{filament_subtype_part}{color_name_part}{note_part}&FI={}{calibrations_part}",
+        //         self.weight_advertised.map(|v| format!("&WA={}", v)).unwrap_or_default(),
+        //         self.weight_core.map(|v| format!("&WC={}", v)).unwrap_or_default(),
+        //         self.weight_new.map(|v| format!("&WN={}", v)).unwrap_or_default(),
+        //         material_part,
+        //         filament.tray_color,
+        //         filament.nozzle_temp_min,
+        //         filament.nozzle_temp_max,
+        //         filament.tray_info_idx,
+        //     ))
     }
 
     // TODO: remove all the printer parts, should only parse, the rest of the matching thould go elsewhere
@@ -1945,10 +2035,10 @@ impl TagInformation {
         let mut id = false;
         let mut v = false;
         let mut m = false;
-        let mut fi = false;
+        let mut _fi = false;
         let mut c = false;
-        let mut nn = false;
-        let mut nx = false;
+        let mut _nn = false;
+        let mut _nx = false;
         for param in descriptor.strip_prefix(FILAMENT_URL_PREFIX).unwrap_or(descriptor).split(['&', '/', '?']) {
             if param == "V1" {
                 v = true;
@@ -1984,7 +2074,7 @@ impl TagInformation {
                         } else {
                             return Err(Error::ParseError);
                         }
-                        nn = true;
+                        _nn = true;
                     }
                     // Nozzle maX Temp
                     "NX" => {
@@ -1993,13 +2083,13 @@ impl TagInformation {
                         } else {
                             return Err(Error::ParseError);
                         }
-                        nx = true;
+                        _nx = true;
                     }
                     // "K4" | "K2" | "K6" | "K8" => (),
                     // // Filament Id/ Tray Index (material code in some form) - looks like Bambu specific
                     "FI" => {
                         filament_info_result.tray_info_idx = String::from(param_value);
-                        fi = true;
+                        _fi = true;
                     }
                     "WA" => {
                         if let Ok(ret_val) = param_value.parse::<i32>() {
@@ -2091,14 +2181,14 @@ impl TagInformation {
             }
         }
 
-        if v && id && m && fi && c && nn && nx {
+        if v && id && m && c {
             Ok(Self {
                 id: None,
                 origin_descriptor: descriptor.to_string(),
                 tag_id,
                 filament: Some(filament_info_result),
                 calibrations: calibrations_result,
-                calibrations_printer_name:  my_decode_from_url_part(calibrations_printer_name),
+                calibrations_printer_name: my_decode_from_url_part(calibrations_printer_name),
                 calibrations_printer_uuid: calibrations_printer_uuid.to_string(),
                 weight_advertised,
                 weight_core,
@@ -2184,7 +2274,12 @@ pub async fn fix_k_on_restart(
     let printer_number = bambu_printer.borrow().printer_number;
     term_info!("[{}] Checking pressure advance (k) at printer startup", printer_number);
     if prev_nozzle != *bambu_printer.borrow().nozzle_diameter() {
-        term_info!("[{}] Nozzle diameter changed ({:?}->{:?}), K restore not relevant", printer_number, prev_nozzle, *bambu_printer.borrow().nozzle_diameter());
+        term_info!(
+            "[{}] Nozzle diameter changed ({:?}->{:?}), K restore not relevant",
+            printer_number,
+            prev_nozzle,
+            *bambu_printer.borrow().nozzle_diameter()
+        );
         bambu_printer.borrow_mut().pending_k_restore_sequence = false;
         return;
     }

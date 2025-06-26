@@ -325,9 +325,9 @@ export component ControlPanel inherits HorizontalLayout {
         triggered() => {
             if AppState.control-state == ControlState.EncodeSelectSource {
                 AppState.highlight-trays = !AppState.highlight-trays;
-                if AppState.spool-staging-state != SpoolStagingState.Empty {
+                // if AppState.spool-staging-state != SpoolStagingState.Empty {
                     AppState.highlight-staging = AppState.highlight-trays;
-                }
+                // }
             } else if AppState.control-state == ControlState.StagingSelected {
                 AppState.highlight-trays = !AppState.highlight-trays;
             }
