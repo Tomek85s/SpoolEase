@@ -350,10 +350,18 @@ impl AppWithStateBuilder for NestedAppBuilder {
         );
 
         let router = router.route(
+            "/vendor.js",
+            get_service(picoserve::response::File::with_content_type_and_headers(
+                "application/javascript; charset=utf-8",
+                include_bytes!("../../inventory/dist/vendor.js.gz"),
+                &[("Content-Encoding", "gzip")],
+            )),
+        );
+        let router = router.route(
             "/inventory",
             get_service(picoserve::response::File::with_content_type_and_headers(
                 "text/html",
-                include_bytes!("../../inventory/dist/index.html.gz"),
+                include_bytes!("../../inventory/dist/src/apps/inventory/index.html.gz"),
                 &[("Content-Encoding", "gzip")],
             )),
         );
