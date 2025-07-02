@@ -122,6 +122,7 @@ export global AppBackend {
     callback set-staging-to-tray(tray-id: int);
     callback encode-tag(encode_request: EncodeRequest) -> int; // returns how long it will try to encode, for timer
     callback notify-post-encode();
+    callback notify-start-encode(tray_id: int);
     callback read-tag-mode();
     callback web-config-web-app();
     callback reset-printer();
@@ -321,6 +322,8 @@ export global AppState {
     }
 
     public function encode-select-tray(tray-index: int) {
+        clear-curr-encoding-request();
+        AppBackend.calc-encode-request-display(FilamentInfoMode.Encode);
         self.curr-encode-request.tray-index = tray-index;
         self.curr-encode-request.tray-id = ((tray-index >= 998) ? tray-index : self.trays-state[tray-index].id);
         self.control-state = ControlState.EncodeEditing;
@@ -329,6 +332,7 @@ export global AppState {
         } else {
             self.encoding-spool-core-visible = false;
         }
+        AppBackend.notify-start-encode(self.curr-encode-request.tray-id);
     }
     public function encode-set-core-info(weight-advertised: int, weight-core: int, weight-new: int, core-name: string) {
         self.curr-encode-request.weight-core = weight-core;
@@ -358,12 +362,11 @@ export global AppState {
         self.curr-encode-request-display.temp-max = 0;
         self.curr-encode-request-display.pa-line1 = "";
         self.curr-encode-request-display.pa-line2 = "";
-
-        AppBackend.notify-post-encode();
     }
 
     public function encode-cancel() {
         clear-curr-encoding-request();
+        AppBackend.notify-post-encode();
         self.control-state = ControlState.Ready;
         AppBackend.read-tag-mode();
     }
@@ -377,6 +380,7 @@ export global AppState {
             user-message-type = StatusType.Normal;
         }
         clear-curr-encoding-request();
+        AppBackend.notify-post-encode();
     }
 
     public function show-spoolscale-dialog(message: string, type: StatusType) {

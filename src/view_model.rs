@@ -554,17 +554,66 @@ impl ViewModel {
         }
     }
 
-    pub fn web_app_set_encode_info(&self, encode_info: &EncodeInfoDTO) {
+    fn get_filament_info(&self, search_code: &str) -> Option<(bool, String, u32, u32)> {
+        let app_config_borrow = self.app_config.borrow();
+        let empty_list = String::new();
+        let filament_lists = [BASE_FILAMENTS, app_config_borrow.custom_filaments.as_ref().unwrap_or(&empty_list)];
+
+        let mut base = true;
+        for filament_list in filament_lists {
+            for line in filament_list.lines() {
+                let mut split = line.split(',');
+                if let (Some(code), Some(name), Some(nozzle_temp_low), Some(nozzle_temp_high)) =
+                    (split.next(), split.next(), split.next(), split.next())
+                {
+                    if code == search_code {
+                        let name = decode_csv_field(name);
+                        let nozzle_temp_low = nozzle_temp_low.parse::<u32>().unwrap_or_default();
+                        let nozzle_temp_high = nozzle_temp_high.parse::<u32>().unwrap_or_default();
+                        return Some((base, name, nozzle_temp_low, nozzle_temp_high));
+                    }
+                }
+            }
+            base = false;
+        }
+        None
+    }
+    pub fn web_app_set_encode_info(&mut self, encode_info: &EncodeInfoDTO) {
         let ui = self.ui_weak.unwrap();
 
         // Initialize UI FrameworkState with framework information
         let ui_app_state = ui.global::<crate::app::AppState>();
         let mut encode_request = ui_app_state.get_curr_encode_request();
+        encode_request.weight_advertised = encode_info.weight_advertised;
+        if encode_request.weight_core != encode_info.weight_core {
+            encode_request.color_name = "".to_shared_string()
+        }
+        encode_request.weight_core = encode_info.weight_core;
         encode_request.brand = encode_info.brand.to_shared_string();
-        encode_request.color_name = encode_info.color_name.to_shared_string();
         encode_request.filament_subtype = encode_info.filament_subtype.to_shared_string();
+        encode_request.color_name = encode_info.color_name.to_shared_string();
         encode_request.note = encode_info.note.to_shared_string();
+        if encode_request.tray_id == 998 {
+            let slicer_filament_enriched_info = if !encode_info.slicer_filament.is_empty() {
+                self.get_filament_info(&encode_info.slicer_filament)
+            } else {
+                None
+            };
+            if let Some(tag_info) = self.encode_from_blank.as_mut() {
+                if let Some(filament) = tag_info.filament.as_mut() {
+                    filament.tray_type = encode_info.material.clone();
+                    filament.tray_color = encode_info.color_code.clone();
+                    filament.tray_info_idx = encode_info.slicer_filament.clone();
+                    if let Some((_, _, nozzle_temp_low, nozzle_temp_high)) = slicer_filament_enriched_info {
+                        filament.nozzle_temp_min = nozzle_temp_low;
+                        filament.nozzle_temp_max = nozzle_temp_high;
+                    }
+                }
+            }
+        }
+
         ui_app_state.set_curr_encode_request(encode_request);
+        self.calc_encode_request_display(crate::app::FilamentInfoMode::Encode);
     }
 
     pub fn web_app_get_encode_info(&self) -> EncodeInfoDTO {
@@ -575,7 +624,8 @@ impl ViewModel {
         let encode_request = ui_app_state.get_curr_encode_request();
         if let Ok(tag_info) = self.tag_info_to_encode(&encode_request) {
             EncodeInfoDTO {
-                brand:  tag_info.brand.unwrap_or_default(),
+                tray_id: encode_request.tray_id,
+                brand: tag_info.brand.unwrap_or_default(),
                 color_name: tag_info.color_name.unwrap_or_default(),
                 filament_subtype: tag_info.filament_subtype.unwrap_or_default(),
                 note: tag_info.note.unwrap_or_default(),
@@ -588,7 +638,7 @@ impl ViewModel {
                 slicer_filament: tag_info.filament.unwrap_or_default().tray_info_idx,
             }
         } else {
-            EncodeInfoDTO::default()
+            EncodeInfoDTO { tray_id: -1, ..Default::default() }
         }
     }
 
@@ -645,43 +695,51 @@ impl ViewModel {
         }
     }
 
-pub fn tag_info_to_encode(&self, encode_request: &EncodeRequest) -> Result<TagInformation, String> {
-    let moved_filament_staging = self.filament_staging.clone();
-    let moved_bambu_printer = self.bambu_printer_model.clone();
-    let tray_id = if let Ok(tray_id) = usize::try_from(encode_request.tray_id) {tray_id} else { return Err("Currently Not Encoding".to_string()) };
-    let borrowed_filament_staging = moved_filament_staging.borrow();
-    let mut tag_info_to_encode = if tray_id == 999 {
-        // Encode from Staging
-        if let Some(tag_info) = &borrowed_filament_staging.tag_info() {
-            tag_info.clone()
+    pub fn tag_info_to_encode(&self, encode_request: &EncodeRequest) -> Result<TagInformation, String> {
+        let moved_filament_staging = self.filament_staging.clone();
+        let moved_bambu_printer = self.bambu_printer_model.clone();
+        let tray_id = if let Ok(tray_id) = usize::try_from(encode_request.tray_id) {
+            tray_id
         } else {
-            return Err("Internal Error Encoding from Staging".to_string());
-        }
-    } else if tray_id == 998 {
-        // Encode from blank, manual data only
-        let tag_info = self.encode_from_blank.clone();
-        tag_info.unwrap() // when we get here this should always pass
-    } else {
-        match moved_bambu_printer.borrow().get_tag_info_to_encode(tray_id) {
-            Ok(tag_info) => tag_info,
-            Err(err) => {
-                // hopefully no borrowing issues since calling into ui in a callback
-                return Err(err); // signals an error, UI will not continue
+            return Err("Currently Not Encoding".to_string());
+        };
+        let borrowed_filament_staging = moved_filament_staging.borrow();
+        let mut tag_info_to_encode = if tray_id == 999 {
+            // Encode from Staging
+            if let Some(tag_info) = &borrowed_filament_staging.tag_info() {
+                tag_info.clone()
+            } else {
+                return Err("Internal Error Encoding from Staging".to_string());
             }
-        }
-    };
-    // let spool_scale_weight = moved_spool_scale.borrow().weight;
-    tag_info_to_encode.id = if !encode_request.id.is_empty() { Some(encode_request.id.clone().into()) } else { None };
-    tag_info_to_encode.weight_new = (encode_request.weight_new != 0).then_some(encode_request.weight_new);
-    tag_info_to_encode.weight_advertised = (encode_request.weight_advertised != 0).then_some(encode_request.weight_advertised);
-    tag_info_to_encode.weight_core = (encode_request.weight_core != 0).then_some(encode_request.weight_core);
-    tag_info_to_encode.brand = (!encode_request.brand.trim().is_empty()).then(|| encode_request.brand.trim().to_string());
-    tag_info_to_encode.filament_subtype =
-        (!encode_request.filament_subtype.trim().is_empty()).then(|| encode_request.filament_subtype.trim().to_string());
-    tag_info_to_encode.color_name = (!encode_request.color_name.trim().is_empty()).then(|| encode_request.color_name.trim().to_string());
-    tag_info_to_encode.note = (!encode_request.note.trim().is_empty()).then(|| encode_request.note.trim().to_string());
-    Ok(tag_info_to_encode)
-}
+        } else if tray_id == 998 {
+            // Encode from blank, manual data only
+            let tag_info = self.encode_from_blank.clone();
+            tag_info.unwrap() // when we get here this should always pass
+        } else {
+            match moved_bambu_printer.borrow().get_tag_info_to_encode(tray_id) {
+                Ok(tag_info) => tag_info,
+                Err(err) => {
+                    // hopefully no borrowing issues since calling into ui in a callback
+                    return Err(err); // signals an error, UI will not continue
+                }
+            }
+        };
+        // let spool_scale_weight = moved_spool_scale.borrow().weight;
+        tag_info_to_encode.id = if !encode_request.id.is_empty() {
+            Some(encode_request.id.clone().into())
+        } else {
+            None
+        };
+        tag_info_to_encode.weight_new = (encode_request.weight_new != 0).then_some(encode_request.weight_new);
+        tag_info_to_encode.weight_advertised = (encode_request.weight_advertised != 0).then_some(encode_request.weight_advertised);
+        tag_info_to_encode.weight_core = (encode_request.weight_core != 0).then_some(encode_request.weight_core);
+        tag_info_to_encode.brand = (!encode_request.brand.trim().is_empty()).then(|| encode_request.brand.trim().to_string());
+        tag_info_to_encode.filament_subtype =
+            (!encode_request.filament_subtype.trim().is_empty()).then(|| encode_request.filament_subtype.trim().to_string());
+        tag_info_to_encode.color_name = (!encode_request.color_name.trim().is_empty()).then(|| encode_request.color_name.trim().to_string());
+        tag_info_to_encode.note = (!encode_request.note.trim().is_empty()).then(|| encode_request.note.trim().to_string());
+        Ok(tag_info_to_encode)
+    }
 
     fn register_printer_related_listeners(&mut self) {
         // handler for request from UI to move to staging, need to work only on selected printer
@@ -792,17 +850,10 @@ pub fn tag_info_to_encode(&self, encode_request: &EncodeRequest) -> Result<TagIn
 
                             if encode_request.tray_index == 998 {
                                 let mut view_model_borrow_mut = moved_view_model.borrow_mut();
-                                if view_model_borrow_mut.encode_from_blank.is_none() {
-                                    let blank_tag_info = TagInformation {
-                                        filament: Some(FilamentInfo::new()),
-                                        ..Default::default()
-                                    };
-                                    view_model_borrow_mut.encode_from_blank = Some(blank_tag_info);
-                                }
                                 if from_blank_request {
                                     let slicer_filament_enriched_info = if !spool_rec.slicer_filament.is_empty() {
                                         // if povided slicer filament setting, then set temps accordingly
-                                        get_filament_info(&view_model_borrow_mut, &spool_rec.slicer_filament)
+                                        view_model_borrow_mut.get_filament_info(&spool_rec.slicer_filament)
                                     } else { None };
 
                                     let filament_info = view_model_borrow_mut.encode_from_blank.as_mut().unwrap().filament.as_mut().unwrap();
@@ -842,169 +893,186 @@ pub fn tag_info_to_encode(&self, encode_request: &EncodeRequest) -> Result<TagIn
         self.ui_weak.unwrap().global::<crate::app::AppBackend>().on_notify_post_encode(move || {
             moved_view_model.borrow_mut().encode_from_blank = None;
         });
-        let moved_ui = self.ui_weak.clone();
-        let moved_staging = self.filament_staging.clone();
-        let moved_bambu = self.bambu_printer_model.clone();
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
+            .on_notify_start_encode(move |tray_id| {
+                if tray_id == 998 {
+                    let blank_tag_info = TagInformation {
+                        filament: Some(FilamentInfo::new()),
+                        ..Default::default()
+                    };
+                    moved_view_model.borrow_mut().encode_from_blank = Some(blank_tag_info);
+                }
+            });
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
         self.ui_weak
             .unwrap()
             .global::<crate::app::AppBackend>()
             .on_calc_encode_request_display(move |mode| {
-                let moved_ui = moved_ui.unwrap();
-                let ui_app_state = moved_ui.global::<crate::app::AppState>();
-                let mut encode_request = ui_app_state.get_curr_encode_request();
-                let mut encode_request_display = ui_app_state.get_curr_encode_request_display();
-                encode_request_display.pa_line1 = "".into();
-                encode_request_display.pa_line2 = "".into();
-                let tray_id = encode_request.tray_id;
+                moved_view_model.borrow().calc_encode_request_display(mode);
+            });
+    }
 
-                let staging_borrow = moved_staging.borrow();
-                let bambu_borrow = moved_bambu.borrow();
-                let (filament_info, tag_info) = match tray_id {
-                    -1 => {
-                        // Special case to avoid a call after encode_request is cleared
-                        return;
-                    }
-                    999 | 998 => {
-                        let tag_info_source = if tray_id == 999 {
-                            staging_borrow.tag_info()
-                        } else {
-                            &moved_view_model.borrow().encode_from_blank
-                        };
-                        if let Some(tag_info) = tag_info_source {
-                            if let Some(filament_info) = &tag_info.filament {
-                                if let Some((nozzle_diameter, calibration)) = &tag_info.calibrations.iter().next() {
-                                    encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name).into();
-                                    encode_request_display.pa_line1 = format!("{}, {}", tag_info.calibrations_printer_name, nozzle_diameter).into();
-                                }
-                                (Some(filament_info.clone()), staging_borrow.tag_info())
-                            } else {
-                                (None, &None)
-                            }
-                        } else {
-                            (None, &None)
+    fn calc_encode_request_display(&self, mode: crate::app::FilamentInfoMode) {
+        let moved_ui = self.ui_weak.unwrap();
+        let ui_app_state = moved_ui.global::<crate::app::AppState>();
+        let mut encode_request = ui_app_state.get_curr_encode_request();
+        let mut encode_request_display = ui_app_state.get_curr_encode_request_display();
+        encode_request_display.pa_line1 = "".into();
+        encode_request_display.pa_line2 = "".into();
+        let tray_id = encode_request.tray_id;
+
+        let staging_borrow = self.filament_staging.borrow();
+        let bambu_borrow = self.bambu_printer_model.borrow();
+        let (filament_info, tag_info) = match tray_id {
+            -1 => {
+                // Special case to avoid a call after encode_request is cleared
+                return;
+            }
+            999 | 998 => {
+                let tag_info_source = if tray_id == 999 {
+                    staging_borrow.tag_info()
+                } else {
+                    &self.encode_from_blank
+                };
+                if let Some(tag_info) = tag_info_source {
+                    if let Some(filament_info) = &tag_info.filament {
+                        if let Some((nozzle_diameter, calibration)) = &tag_info.calibrations.iter().next() {
+                            encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name).into();
+                            encode_request_display.pa_line1 = format!("{}, {}", tag_info.calibrations_printer_name, nozzle_diameter).into();
                         }
-                    }
-                    254 => {
-                        // External Tray
-                        let tray = &bambu_borrow.virt_tray();
-                        if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
-                            encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
-                        }
-                        if let bambu::Filament::Known(filament_info) = &tray.filament {
-                            (Some(filament_info.clone()), &tray.tag_info)
-                        } else {
-                            (None, &None)
-                        }
-                    }
-                    0..15 => {
-                        // Standard trays
-                        // let bambu = moved_bambu.borrow();
-                        let tray = &bambu_borrow.ams_trays()[tray_id as usize];
-                        if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
-                            encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
-                        }
-                        if let bambu::Filament::Known(filament_info) = &tray.filament {
-                            (Some(filament_info.clone()), &tray.tag_info)
-                        } else {
-                            (None, &None)
-                        }
-                    }
-                    _ => {
-                        error!("UI request to update display for tray out of range, software error or printer issue");
+                        (Some(filament_info.clone()), staging_borrow.tag_info())
+                    } else {
                         (None, &None)
                     }
-                };
+                } else {
+                    (None, &None)
+                }
+            }
+            254 => {
+                // External Tray
+                let tray = &bambu_borrow.virt_tray();
+                if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
+                    encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
+                }
+                if let bambu::Filament::Known(filament_info) = &tray.filament {
+                    (Some(filament_info.clone()), &tray.tag_info)
+                } else {
+                    (None, &None)
+                }
+            }
+            0..15 => {
+                // Standard trays
+                // let bambu = moved_bambu.borrow();
+                let tray = &bambu_borrow.ams_trays()[tray_id as usize];
+                if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
+                    encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
+                }
+                if let bambu::Filament::Known(filament_info) = &tray.filament {
+                    (Some(filament_info.clone()), &tray.tag_info)
+                } else {
+                    (None, &None)
+                }
+            }
+            _ => {
+                error!("UI request to update display for tray out of range, software error or printer issue");
+                (None, &None)
+            }
+        };
 
-                // Case when tag used already contains id
+        // Case when tag used already contains id
+        if let Some(tag_info) = tag_info {
+            if let Some(id) = &tag_info.id {
+                encode_request.id = id.to_shared_string();
+            }
+        }
+
+        // Case when id was selected (differently) from UI
+        // In such case need to fetch from store the data and fill it in
+
+        if let Some(filament_info) = filament_info {
+            let first_request_to_display = encode_request_display.filament_type.is_empty(); // checking tray_type is empty to know if it is the first time, later if user changes to empty some value it shouldn't be overriden
+            if first_request_to_display {
                 if let Some(tag_info) = tag_info {
-                    if let Some(id) = &tag_info.id {
-                        encode_request.id = id.to_shared_string();
+                    if encode_request.brand.is_empty() && tag_info.brand.is_some() {
+                        encode_request.brand = tag_info.brand.as_ref().unwrap().to_shared_string();
+                    }
+                    if encode_request.filament_subtype.is_empty() && tag_info.filament_subtype.is_some() {
+                        encode_request.filament_subtype = tag_info.filament_subtype.as_ref().unwrap().to_shared_string();
+                    }
+                    if encode_request.color_name.is_empty() && tag_info.color_name.is_some() {
+                        encode_request.color_name = tag_info.color_name.as_ref().unwrap().to_shared_string();
+                    }
+                    if encode_request.note.is_empty() && tag_info.note.is_some() {
+                        encode_request.note = tag_info.note.as_ref().unwrap().to_shared_string();
+                    }
+                    if encode_request.weight_advertised == 0 && tag_info.weight_advertised.is_some() {
+                        encode_request.weight_advertised = tag_info.weight_advertised.unwrap();
+                    }
+                    if encode_request.weight_core == 0 && tag_info.weight_core.is_some() {
+                        encode_request.weight_core = tag_info.weight_core.unwrap();
+                    }
+                    if encode_request.weight_new == 0 && tag_info.weight_new.is_some() {
+                        encode_request.weight_new = tag_info.weight_new.unwrap();
                     }
                 }
 
-                // Case when id was selected (differently) from UI
-                // In such case need to fetch from store the data and fill it in
-
-                if let Some(filament_info) = filament_info {
-                    let first_request_to_display = encode_request_display.filament_type.is_empty(); // checking tray_type is empty to know if it is the first time, later if user changes to empty some value it shouldn't be overriden
-                    if first_request_to_display {
-                        if let Some(tag_info) = tag_info {
-                            if encode_request.brand.is_empty() && tag_info.brand.is_some() {
-                                encode_request.brand = tag_info.brand.as_ref().unwrap().to_shared_string();
-                            }
-                            if encode_request.filament_subtype.is_empty() && tag_info.filament_subtype.is_some() {
-                                encode_request.filament_subtype = tag_info.filament_subtype.as_ref().unwrap().to_shared_string();
-                            }
-                            if encode_request.color_name.is_empty() && tag_info.color_name.is_some() {
-                                encode_request.color_name = tag_info.color_name.as_ref().unwrap().to_shared_string();
-                            }
-                            if encode_request.note.is_empty() && tag_info.note.is_some() {
-                                encode_request.note = tag_info.note.as_ref().unwrap().to_shared_string();
-                            }
-                            if encode_request.weight_advertised == 0 && tag_info.weight_advertised.is_some() {
-                                encode_request.weight_advertised = tag_info.weight_advertised.unwrap();
-                            }
-                            if encode_request.weight_core == 0 && tag_info.weight_core.is_some() {
-                                encode_request.weight_core = tag_info.weight_core.unwrap();
-                            }
-                            if encode_request.weight_new == 0 && tag_info.weight_new.is_some() {
-                                encode_request.weight_new = tag_info.weight_new.unwrap();
-                            }
-                        }
-
-                        if encode_request.color_name.is_empty() {
-                            let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
-                            let color = slint::Color::from_argb_encoded(color);
-                            let color_name_info = get_color_name(color.red(), color.green(), color.blue());
-                            encode_request.color_name = color_name_info.0.to_shared_string();
-                            if mode == crate::app::FilamentInfoMode::View {
-                                encode_request.color_name = format!("({})", encode_request.color_name).to_shared_string();
-                            }
-                        }
-                    }
-
-                    encode_request_display.color_code = filament_info.tray_color[..filament_info.tray_color.len().min(8)].into();
+                if encode_request.color_name.is_empty() && filament_info.tray_color.len() >= 6 {
                     let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
-                    encode_request_display.title_color = slint::Color::from_argb_encoded(color);
-                    encode_request_display.temp_min = filament_info.nozzle_temp_min.try_into().unwrap_or_default();
-                    encode_request_display.temp_max = filament_info.nozzle_temp_max.try_into().unwrap_or_default();
-                    encode_request_display.filament_type = filament_info.tray_type.into();
-                    // TODO: Add support for custom filaments here
-
-                    if let Some((base, slicer_name, _, _)) = get_filament_info(&moved_view_model.borrow(), &filament_info.tray_info_idx) {
-                        encode_request_display.slicer_name = format!("{slicer_name} ({})", if base { "Base" } else { "Custom" }).into();
-                    } else {
-                        encode_request_display.slicer_name = "Unknown Filament".into();
-                    }
-
-                    if encode_request_display.pa_line1.is_empty() && !encode_request_display.pa_line2.is_empty() {
-                        // if there is a line 2 but line 1 was not filled (staging case)
-                        encode_request_display.pa_line1 = format!(
-                            "{}, {}",
-                            moved_bambu.borrow().printer_name,
-                            moved_bambu.borrow().nozzle_diameter().as_ref().unwrap_or(&"Unknown".to_string())
-                        )
-                        .into();
-                    }
-
-                    if first_request_to_display && encode_request.brand.is_empty() {
-                        if let Some(brand_name) = get_brand_from_text(encode_request_display.pa_line2.as_str()) {
-                            encode_request.brand = brand_name.to_shared_string();
-                        } else if let Some(brand_name) = get_brand_from_text(encode_request_display.slicer_name.as_str()) {
-                            encode_request.brand = brand_name.to_shared_string();
-                        }
-                        if !encode_request.brand.is_empty() && mode == crate::app::FilamentInfoMode::View {
-                            encode_request.brand = format!("({})", encode_request.brand).to_shared_string();
-                        }
-                    }
-
-                    ui_app_state.set_curr_encode_request_display(encode_request_display);
-                    if first_request_to_display {
-                        ui_app_state.set_curr_encode_request(encode_request);
+                    let color = slint::Color::from_argb_encoded(color);
+                    let color_name_info = get_color_name(color.red(), color.green(), color.blue());
+                    encode_request.color_name = color_name_info.0.to_shared_string();
+                    if mode == crate::app::FilamentInfoMode::View {
+                        encode_request.color_name = format!("({})", encode_request.color_name).to_shared_string();
                     }
                 }
-            });
+            }
+
+            encode_request_display.color_code = filament_info.tray_color[..filament_info.tray_color.len().min(8)].into();
+            if filament_info.tray_color.len() >= 6 {
+                let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+                encode_request_display.title_color = slint::Color::from_argb_encoded(color);
+            }
+            encode_request_display.temp_min = filament_info.nozzle_temp_min.try_into().unwrap_or_default();
+            encode_request_display.temp_max = filament_info.nozzle_temp_max.try_into().unwrap_or_default();
+            encode_request_display.filament_type = filament_info.tray_type.into();
+            // TODO: Add support for custom filaments here
+
+            if let Some((base, slicer_name, _, _)) = self.get_filament_info(&filament_info.tray_info_idx) {
+                encode_request_display.slicer_name = format!("{slicer_name} ({})", if base { "Base" } else { "Custom" }).into();
+            } else {
+                encode_request_display.slicer_name = "Unknown Filament".into();
+            }
+
+            if encode_request_display.pa_line1.is_empty() && !encode_request_display.pa_line2.is_empty() {
+                // if there is a line 2 but line 1 was not filled (staging case)
+                encode_request_display.pa_line1 = format!(
+                    "{}, {}",
+                    bambu_borrow.printer_name,
+                    bambu_borrow.nozzle_diameter().as_ref().unwrap_or(&"Unknown".to_string())
+                )
+                .into();
+            }
+
+            if first_request_to_display && encode_request.brand.is_empty() {
+                if let Some(brand_name) = get_brand_from_text(encode_request_display.pa_line2.as_str()) {
+                    encode_request.brand = brand_name.to_shared_string();
+                } else if let Some(brand_name) = get_brand_from_text(encode_request_display.slicer_name.as_str()) {
+                    encode_request.brand = brand_name.to_shared_string();
+                }
+                if !encode_request.brand.is_empty() && mode == crate::app::FilamentInfoMode::View {
+                    encode_request.brand = format!("({})", encode_request.brand).to_shared_string();
+                }
+            }
+
+            ui_app_state.set_curr_encode_request_display(encode_request_display);
+            if first_request_to_display {
+                ui_app_state.set_curr_encode_request(encode_request);
+            }
+        }
     }
 
     fn tag_info_to_ui_spool_info_direct(&self, bambu_printer_borrow: &BambuPrinter, tag_info: &TagInformation) -> Option<crate::app::UiSpoolInfo> {
@@ -1673,30 +1741,6 @@ fn get_brand_from_text(text: &str) -> Option<&'static str> {
     None
 }
 
-fn get_filament_info(view_model_borrow: &ViewModel, search_code: &str) -> Option<(bool, String, u32, u32)> {
-    let app_config_borrow = view_model_borrow.app_config.borrow();
-    let empty_list = String::new();
-    let filament_lists = [BASE_FILAMENTS, app_config_borrow.custom_filaments.as_ref().unwrap_or(&empty_list)];
-
-    let mut base = true;
-    for filament_list in filament_lists {
-        for line in filament_list.lines() {
-            let mut split = line.split(',');
-            if let (Some(code), Some(name), Some(nozzle_temp_low), Some(nozzle_temp_high)) = (split.next(), split.next(), split.next(), split.next())
-            {
-                if code == search_code {
-                    let name = decode_csv_field(name);
-                    let nozzle_temp_low = nozzle_temp_low.parse::<u32>().unwrap_or_default();
-                    let nozzle_temp_high = nozzle_temp_high.parse::<u32>().unwrap_or_default();
-                    return Some((base, name, nozzle_temp_low, nozzle_temp_high));
-                }
-            }
-        }
-        base = false;
-    }
-    None
-}
-
 fn decode_csv_field(s: &str) -> String {
     if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
         s[1..s.len() - 1].replace("\"\"", "\"")
@@ -1737,4 +1781,3 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
         }
     }
 }
-

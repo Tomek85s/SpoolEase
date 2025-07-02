@@ -234,7 +234,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
             post(
                 move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, encode_info: EncodeInfoDTO| {
                     ready({
-                        state.0.view_model.borrow().web_app_set_encode_info(&encode_info);
+                        state.0.view_model.borrow_mut().web_app_set_encode_info(&encode_info);
                         SetConfigResponseDTO { error_text: None }.encrypt(&key.borrow())
                     })
                 },
@@ -504,8 +504,9 @@ impl From<&ScaleConfig> for ScaleConfigDTO {
     }
 }
 
-#[derive(serde::Deserialize, serde::Serialize, Default)]
+#[derive(serde::Deserialize, serde::Serialize, Default, Debug)]
 pub struct EncodeInfoDTO {
+    pub tray_id: i32,
     pub id: String,
     pub tag_id: String,
     pub color_code: String,
