@@ -1,5 +1,6 @@
 use crate::csvdb::deserialize_optional;
 use core::{any::Any, cell::RefCell};
+use embassy_time::Instant;
 use hashbrown::HashMap;
 use once_cell::unsync::OnceCell;
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,7 @@ use alloc::{
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel};
 use framework::{
     debug, error, info, mk_static,
+    ntp::InstantExt,
     prelude::Framework,
     settings::{FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES},
     term_error, term_info,
@@ -225,6 +227,7 @@ impl Store {
         let new_spool_id = (*self.last_spool_id.borrow()) + 1;
         if let Some(spools_db) = &self.spools_db.get() {
             spool_record.id = new_spool_id.to_string();
+            spool_record.added_time = store_safe_time_now();
             match spools_db.insert(spool_record).await.context(CsvDbSnafu)? {
                 true => {
                     *self.last_spool_id.borrow_mut() = new_spool_id;
@@ -259,9 +262,10 @@ impl Store {
                         brand: spool_record.brand,
                         weight_advertised: spool_record.weight_advertised,
                         weight_core: spool_record.weight_core,
-                        weight_new: current_record.weight_new, // can't change from web
+                        weight_new: current_record.weight_new,         // can't change from web
                         weight_current: current_record.weight_current, // can't change from web
                         slicer_filament: spool_record.slicer_filament,
+                        added_time: current_record.added_time,
                     }
                 } else {
                     return Err(StoreError::NotFound { id: spool_record.id.clone() });
@@ -431,6 +435,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                     weight_new: tag_info.weight_new,
                     weight_current: None,
                     slicer_filament: filament_info.tray_info_idx,
+                    added_time: None,
                 };
                 if let Some(spools_db) = store.spools_db.get() {
                     spool_rec.weight_current = match weight {
@@ -449,6 +454,12 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                         match fields {
                             FieldsOverrideDirective::TagOverride => (),
                             FieldsOverrideDirective::StoreOverride => spool_rec.note = existing_record_current_note,
+                        }
+                    }
+
+                    if !added_new_record {
+                        if let Some(current_rec) = spools_db.records.borrow().get(&use_spool_id) {
+                            spool_rec.added_time = current_rec.data.added_time;
                         }
                     }
 
@@ -563,6 +574,8 @@ pub struct SpoolRecord {
     pub weight_current: Option<i32>, // 4
     #[serde(default)]
     pub slicer_filament: String,
+    #[serde(default, deserialize_with = "deserialize_optional")]
+    pub added_time: Option<i32>,
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
     // pub price: Option<()>,
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
@@ -575,8 +588,6 @@ pub struct SpoolRecord {
     //
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
     // pub purchased: Option<()>,
-    // #[serde(default,deserialize_with = "deserialize_optional_unit")]
-    // pub added: Option<()>,
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
     // pub opened: Option<()>,
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
@@ -614,6 +625,10 @@ fn spool_rec_ext_file_path(ext_rec: &SpoolRecord) -> Result<String, InternalErro
     } else {
         Err(InternalError::BadId)
     }
+}
+
+fn store_safe_time_now() -> Option<i32> {
+    Instant::now().to_date_time().map(|date_time| date_time.timestamp() as i32)
 }
 
 // const FAT_CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789"; // 35 chars

@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "SpoolEase"
-version = "0.4.0-alpha8"
+version = "0.4.0-alpha9"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -849,9 +849,9 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chrono"
-version = "0.4.40"
+version = "0.4.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a7964611d71df112cb1730f2ee67324fcf4d0fc6606acbbe9bfe06df124637c"
+checksum = "c469d952047f47f91b68d1cba3f10d63c11d73e4636f24f08daf0278abf01c4d"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -2096,13 +2096,14 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-app-framework"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aes",
  "aes-gcm",
  "anyhow",
  "base64 0.22.1",
  "cfg-if",
+ "chrono",
  "critical-section",
  "ctr",
  "deku",
@@ -2163,6 +2164,7 @@ dependencies = [
  "slint",
  "smoltcp",
  "snafu",
+ "sntpc",
  "static_cell",
  "xtensa-lx-rt",
 ]
@@ -5823,6 +5825,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.101",
+]
+
+[[package]]
+name = "sntpc"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78f778a0f82b3cf5d75f858eceee38e84d5292f1d03415e88cc4ec45ca6ba8a2"
+dependencies = [
+ "cfg-if",
+ "embassy-net",
 ]
 
 [[package]]

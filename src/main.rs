@@ -230,6 +230,7 @@ async fn main(spawner: Spawner) {
         default_fixed_security_key: None,
 
         mdns: true,
+        ntp: true,
     };
 
     let framework = Framework::new(framework_settings, flash_map.clone(), spawner, sta_stack, tls.reference(), None);
