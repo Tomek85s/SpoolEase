@@ -811,13 +811,13 @@ impl ViewModel {
             15
         });
 
-        // handler for request from UI to reset printer, should work only on selected printer
-        let moved_bambu_printer = self.bambu_printer_model.clone();
-        let moved_ui = self.ui_weak.clone();
-        self.ui_weak.unwrap().global::<crate::app::AppBackend>().on_reset_printer(move || {
-            moved_bambu_printer.borrow_mut().reset_printer();
-            moved_ui.unwrap().global::<crate::app::AppState>().invoke_reset_printer();
-        });
+        // // handler for request from UI to reset printer, should work only on selected printer
+        // let moved_bambu_printer = self.bambu_printer_model.clone();
+        // let moved_ui = self.ui_weak.clone();
+        // self.ui_weak.unwrap().global::<crate::app::AppBackend>().on_reset_printer(move || {
+        //     moved_bambu_printer.borrow_mut().reset_printer();
+        //     moved_ui.unwrap().global::<crate::app::AppState>().invoke_reset_printer();
+        // });
 
         // handle encoding related listener(s) - this depends on current printer
 
@@ -1477,6 +1477,10 @@ impl FrameworkObserver for ViewModel {
             term_info!(&"-".repeat(66));
             term_info!("Initialization completed successfully");
             term_info!(&"-".repeat(66));
+            self.ui_weak
+                .unwrap()
+                .global::<crate::app::AppState>()
+                .invoke_initialization_completed();
         } else {
             // TODO: This event here goes to the AppState and not to Framework, think about that.
             self.ui_weak

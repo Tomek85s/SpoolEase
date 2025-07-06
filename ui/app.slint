@@ -80,7 +80,7 @@ export global AppConsts {
 
 export enum ControlState {
   Booting,
-  ConnectingToPrinter ,
+  // ConnectingToPrinter ,
   BootFailed,
   Ready,
   Reading,
@@ -125,7 +125,7 @@ export global AppBackend {
     callback notify-start-encode(tray_id: int);
     callback read-tag-mode();
     callback web-config-web-app();
-    callback reset-printer();
+    // callback reset-printer();
     callback select-printer(printer: string);
     callback calibrate-scale(weight: int);
     callback erase-previously-used-core-list();
@@ -141,6 +141,7 @@ export global AppBackend {
 export global AppState {
     in-out property <bool> select-printer: false;
     in-out property <ControlState> control-state: ControlState.Booting;
+    in-out property <bool> some-printer-connected: false;
     in-out property <bool> encoding-spool-core-visible: false;
     in-out property <bool> encoding-select-spool-id: false;
     changed control-state => {
@@ -219,9 +220,16 @@ export global AppState {
 // Functions called locally fom Rust
 
     public function printer-connected(printer-name: string) {
-        if self.control-state == ControlState.Booting || self.control-state == ControlState.ConnectingToPrinter {
+        if self.control-state == ControlState.Booting /*|| self.control-state == ControlState.ConnectingToPrinter*/ {
             self.control-state = ControlState.Ready;
         }
+        self.some-printer-connected = true;
+    }
+
+    public function initialization_completed() {
+        if self.control-state == ControlState.Booting {
+            self.control-state = ControlState.Ready;
+          }
     }
 
     public function boot-failed(status: string) {
@@ -465,12 +473,12 @@ export global AppState {
         self.pending-curr-printer = curr-printer
     }
 
-    public function reset-printer() {
-        self.curr-ams-id = 0;
-        self.ams-exists = [0];
-        self.trays-state = self.empty-trays-state();
-        self.control-state = ControlState.ConnectingToPrinter;
-    }
+    // public function reset-printer() {
+    //     self.curr-ams-id = 0;
+    //     self.ams-exists = [0];
+    //     self.trays-state = self.empty-trays-state();
+    //     self.control-state = ControlState.ConnectingToPrinter;
+    // }
 
     function empty-trays-state() -> [UiTray] {
         return [

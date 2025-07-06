@@ -148,9 +148,9 @@ export component Booting inherits ControlPanelBase {
     message-text: "Booting";
 }
 
-export component ConnectingToPrinter inherits ControlPanelBase {
-    message-text: "Connecting to Printer" + (AppState.available-printers.length > 1 ? "\n\n\{AppState.curr-printer}" : "");
-}
+// export component ConnectingToPrinter inherits ControlPanelBase {
+//     message-text: "Connecting to Printer" + (AppState.available-printers.length > 1 ? "\n\n\{AppState.curr-printer}" : "");
+// }
 
 export component BootFailed inherits ControlPanelBase {
     message-text: "Boot Failed";
@@ -181,7 +181,9 @@ export component Ready inherits ControlPanelBase {
     }
 
     message-color: color-timer.color;
-    message-text: (AppState.spool-staging-state == SpoolStagingState.Empty) ? ("Scanning for Tagged Spool..." + (AppState.available-printers.length > 1 ? "\n\n\{AppState.curr-printer}" : "")) : "Load Spool\nor Rescan Tag" + (AppState.available-printers.length > 1 ? "\n\n\{AppState.curr-printer}" : "");
+    message-text: (AppState.spool-staging-state == SpoolStagingState.Empty ? "Scanning for Tagged Spool..." : "Load Spool\nor Rescan Tag") + 
+                  (AppState.available-printers.length > 1 ? "\n\n\{AppState.curr-printer}" : "") +
+                  (AppState.available-printers.length >= 1 && AppState.some-printer-connected ? "" : "\n\nConnecting to Printer(s)");
     button1-text: (AppState.spool-staging-state != SpoolStagingState.Empty) ? "Clear Staging" : "";
     button1-timeout: (AppState.spool-staging-state != SpoolStagingState.Empty) ? 60 : 0;
     button2-text: "Encode Tag";
@@ -290,9 +292,9 @@ export component ControlPanel inherits HorizontalLayout {
     if AppState.control-state == ControlState.Booting: Booting {
         button-width: button-width;
     }
-    if AppState.control-state == ControlState.ConnectingToPrinter: ConnectingToPrinter {
-        button-width: button-width;
-    }
+    // if AppState.control-state == ControlState.ConnectingToPrinter: ConnectingToPrinter {
+    //     button-width: button-width;
+    // }
     if AppState.control-state == ControlState.BootFailed: BootFailed {
         button-width: button-width;
     }
