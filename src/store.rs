@@ -267,6 +267,7 @@ impl Store {
                         weight_current: current_record.weight_current, // can't change from web
                         slicer_filament: spool_record.slicer_filament,
                         added_time: current_record.added_time,
+                        encode_time: current_record.encode_time,
                     }
                 } else {
                     return Err(StoreError::NotFound { id: spool_record.id.clone() });
@@ -442,6 +443,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                         weight_current: None,
                         slicer_filament: filament_info.tray_info_idx,
                         added_time: None,
+                        encode_time: tag_info.encode_time,
                     };
                     if let Some(spools_db) = store.spools_db.get() {
                         spool_rec.weight_current = match weight {
@@ -586,6 +588,8 @@ pub struct SpoolRecord {
     pub slicer_filament: String,
     #[serde(default, deserialize_with = "deserialize_optional")]
     pub added_time: Option<i32>,
+    #[serde(default, deserialize_with = "deserialize_optional")]
+    pub encode_time: Option<i32>,
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
     // pub price: Option<()>,
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
@@ -637,7 +641,7 @@ fn spool_rec_ext_file_path(ext_rec: &SpoolRecord) -> Result<String, InternalErro
     }
 }
 
-fn store_safe_time_now() -> Option<i32> {
+pub fn store_safe_time_now() -> Option<i32> {
     Instant::now().to_date_time().map(|date_time| date_time.timestamp() as i32)
 }
 

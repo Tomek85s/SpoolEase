@@ -309,6 +309,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
                         weight_current: None,
                         slicer_filament: add_spool.slicer_filament,
                         added_time: None, // will be added by store if required
+                        encode_time: None // will be added by store if required
                     };
                     if new_spool.id.is_empty() {
                         match store.add_untagged_spool(new_spool).await {

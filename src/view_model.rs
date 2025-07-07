@@ -30,7 +30,7 @@ use crate::color_utils::get_color_name;
 use crate::filament_staging::{self, StagingOrigin};
 use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
 use crate::ssdp::{ssdp_task, SSDPPubSubChannel};
-use crate::store::{AnyClone, Cookie, FieldsOverrideDirective, Store, StoreObserver, StoreOp, TagFileDirective, WeightStoreDirective};
+use crate::store::{store_safe_time_now, AnyClone, Cookie, FieldsOverrideDirective, Store, StoreObserver, StoreOp, TagFileDirective, WeightStoreDirective};
 use crate::web_app::EncodeInfoDTO;
 use crate::{
     app_config::AppConfig,
@@ -773,7 +773,7 @@ impl ViewModel {
 
             let tray_id = usize::try_from(encode_request.tray_id).unwrap();
             // Fill in tag information
-            let tag_info_to_encode = match moved_view_model.borrow().tag_info_to_encode(&encode_request) {
+            let mut tag_info_to_encode = match moved_view_model.borrow().tag_info_to_encode(&encode_request) {
                 Ok(tag_info) => tag_info,
                 Err(err) => {
                     moved_ui
@@ -783,6 +783,8 @@ impl ViewModel {
                     return 0;
                 }
             };
+
+            tag_info_to_encode.encode_time =  store_safe_time_now();
 
             // In case of encode from blank, clean the scratch-pad used
             // If want to allow to return in case of cancel, need to move this to after encode success

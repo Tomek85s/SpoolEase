@@ -1899,6 +1899,7 @@ pub struct TagInformation {
     pub filament_subtype: Option<String>,
     pub color_name: Option<String>,
     pub note: Option<String>,
+    pub encode_time: Option<i32>,
 }
 
 impl TagInformation {
@@ -1999,8 +2000,9 @@ impl TagInformation {
         let advertised_weight_part = self.weight_advertised.map(|v| format!("&WA={}", v)).unwrap_or_default();
         let weight_core_part = self.weight_core.map(|v| format!("&WC={}", v)).unwrap_or_default();
         let weight_new_part = self.weight_new.map(|v| format!("&WN={}", v)).unwrap_or_default();
+        let encode_time_part = self.encode_time.map(|v| format!("&DE={}", v)).unwrap_or_default();
 
-        Some(format!("{FILAMENT_URL_PREFIX}V1?ID={TAG_PLACEHOLDER}{material_part}{filament_subtype_part}{color_part}{color_name_part}{brand_part}{advertised_weight_part}{weight_core_part}{weight_new_part}{nozzle_temp_min_part}{nozzle_temp_max_part}{note_part}{tray_info_idx_part}{calibrations_part}"))
+        Some(format!("{FILAMENT_URL_PREFIX}V1?ID={TAG_PLACEHOLDER}{encode_time_part}{material_part}{filament_subtype_part}{color_part}{color_name_part}{brand_part}{advertised_weight_part}{weight_core_part}{weight_new_part}{nozzle_temp_min_part}{nozzle_temp_max_part}{note_part}{tray_info_idx_part}{calibrations_part}"))
 
         // self.filament.as_ref().map(|filament| format!(
         //         "{FILAMENT_URL_PREFIX}V1?ID={TAG_PLACEHOLDER}{}{}{}{material_part}&C={}&NN={}&NX={}{brand_part}{filament_subtype_part}{color_name_part}{note_part}&FI={}{calibrations_part}",
@@ -2028,6 +2030,7 @@ impl TagInformation {
         let mut color_name = None;
         let mut note = None;
         let mut tag_id = None;
+        let mut encode_time = None;
 
         if !(descriptor.starts_with(FILAMENT_URL_PREFIX)) {
             return Err(Error::ParseError);
@@ -2127,6 +2130,13 @@ impl TagInformation {
                     "N" => {
                         note = Some(my_decode_from_url_part(param_value));
                     }
+                    "DE" => {
+                        if let Ok(ret_val) = param_value.parse::<i32>() {
+                            encode_time = Some(ret_val);
+                        } else {
+                            return Err(Error::ParseError);
+                        }
+                    }
                     _ => (), //return Err(Error::ParseError), TODO: verify match to pattern, or even run what's coming next inside here
                 }
             }
@@ -2199,6 +2209,7 @@ impl TagInformation {
                 filament_subtype,
                 color_name,
                 note,
+                encode_time,
             })
         } else {
             Err(Error::MissingFields)
