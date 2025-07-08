@@ -993,6 +993,9 @@ Pda16356,SUNLU PLA PLA + 2,190,240"
 
         // Update all printer numbers and IDs
         updatePrinterNumbers();
+
+        const printersApplyButton = document.getElementById("printers-apply");
+        printersApplyButton.disabled = false;
       }
 
       function updatePrinterNumbers() {
