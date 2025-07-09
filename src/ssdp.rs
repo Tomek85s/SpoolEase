@@ -1,8 +1,15 @@
-use alloc::string::{String, ToString};
+use core::cell::RefCell;
+
+use alloc::{
+    rc::Rc,
+    string::{String, ToString},
+};
 use embassy_futures::select::{select, Either};
 use embassy_net::Stack;
-use framework::error;
+use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
+use framework::{error, info, prelude::Framework};
 use hashbrown::HashMap;
+use smoltcp::wire::IpVersion;
 
 use crate::app::MAX_NUM_SSDP_LISTENERS;
 
@@ -24,7 +31,7 @@ impl SSDPInfo {
 
 #[embassy_executor::task]
 pub async fn ssdp_task(
-    stack: Stack<'static>,
+    framework: Rc<RefCell<Framework>>,
     ssdp_pub_sub: &'static embassy_sync::pubsub::PubSubChannel<
         embassy_sync::blocking_mutex::raw::NoopRawMutex,
         SSDPInfo,
@@ -33,6 +40,11 @@ pub async fn ssdp_task(
         1,
     >,
 ) {
+    let stack = framework.borrow().stack;
+    info!("ssdp_task started");
+    Framework::wait_for_wifi(&framework).await;
+    info!("ssdp_task link is up");
+
     let (mut rx_buffer1, mut rx_buffer2) = (alloc::vec![0; 512], alloc::vec![0; 512]);
     let (mut tx_buffer1, mut tx_buffer2) = ([0; 0], [0; 0]);
     let (mut rx_meta1, mut rx_meta2) = (
@@ -44,6 +56,10 @@ pub async fn ssdp_task(
         [embassy_net::udp::PacketMetadata::EMPTY; 16],
     );
     let (mut buf1, mut buf2) = (alloc::vec![0; 512], alloc::vec![0; 512]);
+
+    info!(">>>> Sending IGMP");
+    send_igmp_packet(stack).await;
+    info!(">>>> Done Sending IGMP");
 
     stack.join_multicast_group(embassy_net::Ipv4Address::new(239, 255, 255, 250)).unwrap();
     let recv_source_endpoint1 = embassy_net::IpEndpoint {
@@ -103,4 +119,34 @@ pub async fn ssdp_task(
             }
         }
     }
+}
+
+async fn send_igmp_packet(stack: Stack<'static>) {
+    let (mut rx_buffer, mut tx_buffer) = (alloc::vec![0; 512], alloc::vec![0; 512]);
+    let (mut rx_meta, mut tx_meta) = (
+        [embassy_net::raw::PacketMetadata::EMPTY; 16],
+        [embassy_net::raw::PacketMetadata::EMPTY; 16],
+    );
+
+    let igmp_socket = embassy_net::raw::RawSocket::new::<WifiDevice<'_, WifiStaDevice>>(
+        stack,
+        IpVersion::Ipv4,
+        smoltcp::wire::IpProtocol::Igmp,
+        &mut rx_meta,
+        &mut rx_buffer,
+        &mut tx_meta,
+        &mut tx_buffer,
+    );
+
+    let igmp_repr = smoltcp::wire::IgmpRepr::MembershipReport {
+        group_addr: smoltcp::wire::Ipv4Address::new(239, 255, 255, 250), // Example multicast address
+        version: smoltcp::wire::IgmpVersion::Version2,
+    };
+
+    // Get buffer and emit IGMP packet
+    let mut buffer = [0u8; 8]; // IGMP packets are typically 8 bytes
+    let mut igmp_packet = smoltcp::wire::IgmpPacket::new_unchecked(&mut buffer);
+    igmp_repr.emit(&mut igmp_packet);
+
+    igmp_socket.send(&buffer).await;
 }

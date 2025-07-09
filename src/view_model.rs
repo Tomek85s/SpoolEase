@@ -99,7 +99,7 @@ impl ViewModel {
 
         // Initialize ssdp
         let ssdp_pub_sub = mk_static!(SSDPPubSubChannel, SSDPPubSubChannel::new());
-        spawner.spawn(ssdp_task(stack, ssdp_pub_sub)).ok();
+        spawner.spawn(ssdp_task(framework.clone(), ssdp_pub_sub)).ok();
 
         // Initialize store
         let store = Store::new(framework.clone());

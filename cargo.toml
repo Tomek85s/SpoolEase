@@ -73,7 +73,7 @@ embedded-io-async = { version = "0.6.1" }
 embassy-embedded-hal = { version = "0.3.0" }
 embassy-time = { version = "0.4.0", features = ["generic-queue-8"] }
 embassy-executor = { version = "0.7.0", features = ["nightly"] }
-embassy-net = { version = "0.6.0", features = [ "tcp", "udp", "dhcpv4", "medium-ethernet", "multicast" ] }
+embassy-net = { version = "0.6.0", features = ["raw", "tcp", "udp", "dhcpv4", "medium-ethernet", "multicast" ] }
 embassy-futures = { version = "0.1.1" }
 embassy-sync = { version = "0.6.2" }
 futures = { version = "0.3.31", features = ["alloc"], default-features = false }
