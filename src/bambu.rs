@@ -2276,7 +2276,8 @@ impl TryFrom<SSDPInfo> for BambuSSDPInfo {
     }
 }
 
-#[embassy_executor::task(pool_size = 2)] // up to two printers in parallel
+// TODO: make this task instead of being spawned in parallel accept requests over channel and so no need to waste memory on task state 
+#[embassy_executor::task(pool_size = 3)] // up to three printers in parallel
 pub async fn fix_k_on_restart(
     bambu_printer: Rc<RefCell<BambuPrinter>>,
     prev_ams_trays: Vec<Tray>,
