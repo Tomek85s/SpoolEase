@@ -11,6 +11,7 @@ use embassy_futures::select::Either3;
 use embassy_net::tcp::State;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::IpEndpoint;
+use embassy_net::Ipv4Address;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::PubSubChannel;
@@ -29,6 +30,8 @@ use mqttrust::{
 use framework::prelude::*;
 
 use crate::bambu::BambuPrinter;
+
+const DEBUG_MODE: (bool, Ipv4Address) = (true, Ipv4Address::new(192, 168, 10, 63));
 
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -347,6 +350,11 @@ pub async fn generic_mqtt_task<
     write_timeout: Duration,
     bambu_printer: Rc<RefCell<BambuPrinter>>,
 ) -> ! {
+    if DEBUG_MODE.0 {
+        warn!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        warn!("!!!!!!! Running in DEBUG MODE !!!!!!!!!!!");
+        warn!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    }
     let stack = framework.borrow().stack;
     let tls = framework.borrow().tls;
     let printer_log_id = bambu_printer.borrow().printer_number;
@@ -388,27 +396,65 @@ pub async fn generic_mqtt_task<
             port
         );
         let mut socket_error_count = 0;
-        match socket.connect(remote_endpoint).await {
-            Ok(()) => (),
-            Err(e) => {
-                // match e {
-                //     ConnectError::InvalidState | ConnectError::ConnectionReset => {
-                //     }
-                //     ConnectError::TimedOut => (),
-                //     ConnectError::NoRoute => (),
-                // }
-                socket_error_count += 1;
-                if socket_error_count % 10 == 0 {
-                    term_error!("[{}] Unexpected error connecting socket {:?}", printer_log_id, e);
+
+        if DEBUG_MODE.0 {
+            let simulator_remote_endpoint = (DEBUG_MODE.1, 8883);
+            match socket.connect(simulator_remote_endpoint).await {
+                Ok(()) => (),
+                Err(e) => {
+                    // match e {
+                    //     ConnectError::InvalidState | ConnectError::ConnectionReset => {
+                    //     }
+                    //     ConnectError::TimedOut => (),
+                    //     ConnectError::NoRoute => (),
+                    // }
+                    socket_error_count += 1;
+                    if socket_error_count % 10 == 0 {
+                        term_error!("[{}] Unexpected error connecting socket {:?}", printer_log_id, e);
+                    }
+                    Timer::after(Duration::from_millis(1000)).await;
+                    continue;
                 }
-                Timer::after(Duration::from_millis(1000)).await;
-                continue;
+            }
+        } else {
+            match socket.connect(remote_endpoint).await {
+                Ok(()) => (),
+                Err(e) => {
+                    // match e {
+                    //     ConnectError::InvalidState | ConnectError::ConnectionReset => {
+                    //     }
+                    //     ConnectError::TimedOut => (),
+                    //     ConnectError::NoRoute => (),
+                    // }
+                    socket_error_count += 1;
+                    if socket_error_count % 10 == 0 {
+                        term_error!("[{}] Unexpected error connecting socket {:?}", printer_log_id, e);
+                    }
+                    Timer::after(Duration::from_millis(1000)).await;
+                    continue;
+                }
             }
         }
 
         term_info!("[{}] Connected to Printer {}", printer_log_id, printer_name);
 
-        let servername = CString::new(printer_serial).unwrap();
+        let servername = if DEBUG_MODE.0 {
+            CString::new("simulator").unwrap()
+        } else {
+            CString::new(printer_serial).unwrap()
+        };
+
+        let certificates = if DEBUG_MODE.0 {
+            esp_mbedtls::Certificates {
+                ca_chain: X509::pem(concat!(include_str!("./certs/simulator.pem"), "\0").as_bytes()).ok(),
+                ..Default::default()
+            }
+        } else {
+            esp_mbedtls::Certificates {
+                ca_chain: X509::pem(concat!(include_str!("./certs/bambulab.pem"), "\0").as_bytes()).ok(),
+                ..Default::default()
+            }
+        };
 
         let mut session = match esp_mbedtls::asynch::Session::new(
             socket,
@@ -416,10 +462,7 @@ pub async fn generic_mqtt_task<
                 servername: servername.as_c_str(),
             },
             esp_mbedtls::TlsVersion::Tls1_2,
-            esp_mbedtls::Certificates {
-                ca_chain: X509::pem(concat!(include_str!("./certs/bambulab.pem"), "\0").as_bytes()).ok(),
-                ..Default::default()
-            },
+            certificates,
             tls,
         ) {
             Ok(tls_starter) => tls_starter,

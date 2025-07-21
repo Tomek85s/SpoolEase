@@ -25,7 +25,7 @@ use framework::{
 
 use crate::app::{EncodeRequest, FilamentInfoMode};
 use crate::app_config::{BASE_FILAMENTS, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
-use crate::bambu::{FilamentInfo, TrayBits};
+use crate::bambu::{FilamentInfo, Tray, TrayBits};
 use crate::color_utils::get_color_name;
 use crate::filament_staging::{self, StagingOrigin};
 use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
@@ -364,6 +364,11 @@ impl ViewModel {
                     self.framework.clone(),
                     self.view_model.clone().unwrap(),
                 ))
+                .ok();
+            self.framework
+                .borrow()
+                .spawner
+                .spawn(store_printers_consume(self.view_model.clone().unwrap()))
                 .ok();
         }
 
@@ -978,7 +983,7 @@ impl ViewModel {
                     encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
                 }
                 if let bambu::Filament::Known(filament_info) = &tray.filament {
-                    (Some(filament_info.clone()), &tray.tag_info)
+                    (Some(filament_info.clone()), &tray.meta_info.tag_info)
                 } else {
                     (None, &None)
                 }
@@ -991,7 +996,7 @@ impl ViewModel {
                 //     encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
                 // }
                 if let bambu::Filament::Known(filament_info) = &tray.filament {
-                    (Some(filament_info.clone()), &tray.tag_info)
+                    (Some(filament_info.clone()), &tray.meta_info.tag_info)
                 } else {
                     (None, &None)
                 }
@@ -1198,13 +1203,34 @@ impl ViewModel {
             } else {
                 ui_tray.filament.state = crate::app::UiFilamentState::Unknown;
             }
-            ui_tray.tagged = curr_tray.tag_info.is_some();
+            ui_tray.tagged = curr_tray.meta_info.tag_info.is_some();
             // let k_value_unformatted = curr_tray.k.as_ref().unwrap_or(&"(0.020)".to_string()).clone();
             let k_value_unformatted = bambu_printer.get_tray_resolved_k_value(curr_tray);
             // let k_value_for_ui = k_value_for_ui(&k_value_unformatted);
             ui_tray.k = SharedString::from(k_value_unformatted);
+            ui_tray.weight_display = self.weight_display(curr_tray);
             trays_state.set_row_data(tray_row, ui_tray);
         }
+    }
+
+    fn weight_display(&self, tray: &Tray) -> SharedString {
+        let mut res = SharedString::new();
+        if tray.meta_info.consumed_since_load != 0.0 {
+            res = slint::format!("-{:.1}g", tray.meta_info.consumed_since_load);
+        }
+        if let Some(tag_info) = &tray.meta_info.tag_info {
+            if let Some(id) = &tag_info.id {
+                if let Some(spool) = self.store.get_spool_by_id(id) {
+                    if let (Some(weight_core), Some(weight_current)) = (spool.weight_core, spool.weight_current) {
+                        let realtime_weight = (weight_current as f32
+                            - (tray.meta_info.consumed_since_load - tray.meta_info.consumed_since_load_saved))
+                            - weight_core as f32;
+                        res = slint::format!("{:.1}g", realtime_weight);
+                    }
+                }
+            }
+        }
+        res
     }
 }
 
@@ -1832,5 +1858,81 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
         if printer_index >= num_of_printers {
             printer_index = 0;
         }
+    }
+}
+
+#[embassy_executor::task]
+pub async fn store_printers_consume(view_model: Rc<RefCell<ViewModel>>) {
+    info!("store_printers_consume task started");
+    let store = view_model.borrow().store.clone();
+    Timer::after_secs(10).await;
+    loop {
+        if store.is_available() {
+            break;
+        }
+        Timer::after_secs(1).await;
+    }
+    if !store.is_available() {
+        warn!("Store is not available in store_printer_consume_task");
+        return;
+    }
+    //TODO: test CsvDB is available
+    let num_of_printers = view_model.borrow().bambu_printer_model.printers.len();
+    loop {
+        for printer_index in 0..num_of_printers {
+            let printer = view_model.borrow().bambu_printer_model.printers[printer_index].clone();
+            let num_of_trays = printer.borrow().ams_trays().len();
+            for tray_id in 0..num_of_trays {
+                let spool_id;
+                let consumed_during_print;
+                let consumed_during_print_saved;
+                {
+                    let printer_borrow = printer.borrow();
+                    let tray = &printer_borrow.ams_trays()[tray_id];
+                    spool_id = if let Some(tag_info) = &tray.meta_info.tag_info {
+                        if let Some(id) = &tag_info.id {
+                            id.clone()
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    };
+                    consumed_during_print = tray.meta_info.consumed_since_load;
+                    if consumed_during_print == 0.0 {
+                        continue;
+                    }
+                    consumed_during_print_saved = tray.meta_info.consumed_since_load_saved;
+                    if consumed_during_print_saved == consumed_during_print {
+                        continue;
+                    }
+                }
+                let store = view_model.borrow().store.clone();
+                if let Some(mut spool_rec) = store.get_spool_by_id(&spool_id) {
+                    let consumption_to_add_save = consumed_during_print - consumed_during_print_saved;
+                    spool_rec.consumed_since_add += consumption_to_add_save;
+                    spool_rec.consumed_since_weight += consumption_to_add_save;
+                    info!(
+                        "Increase spool {} consumption by {:2}g to total so far {:2}g and since last weight to {:2}g",
+                        spool_id, consumption_to_add_save, spool_rec.consumed_since_add, spool_rec.consumed_since_weight
+                    );
+                    match store.update_spool(spool_rec).await {
+                        Ok(_) => {
+                            // update saved in tray
+                            let mut printer_borrow = printer.borrow_mut();
+                            printer_borrow.update_ams_tray(tray_id, |tray| {
+                                tray.meta_info.consumed_since_load_saved = tray.meta_info.consumed_since_load
+                            });
+                        }
+                        Err(err) => {
+                            error!("Error updating consumption of spool {spool_id} : {err}");
+                        }
+                    }
+                } else {
+                    error!("While updating consume data spool_id not found");
+                }
+            }
+        }
+        Timer::after_secs(5).await;
     }
 }

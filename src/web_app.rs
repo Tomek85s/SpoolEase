@@ -308,8 +308,15 @@ impl AppWithStateBuilder for NestedAppBuilder {
                         weight_new: None,
                         weight_current: None,
                         slicer_filament: add_spool.slicer_filament,
-                        added_time: None, // will be added by store if required
-                        encode_time: None // will be added by store if required
+                        added_time: None,  // will be added by store if required
+                        encode_time: None, // will be added by store if required
+                        added_full: match add_spool.full_unused.to_lowercase().as_str() {
+                            "y" => Some(true),
+                            "n" => Some(false),
+                            _ => None,
+                        },
+                        consumed_since_add: 0.0,
+                        consumed_since_weight: 0.0,
                     };
                     if new_spool.id.is_empty() {
                         match store.add_untagged_spool(new_spool).await {
@@ -667,6 +674,7 @@ pub struct AddSpoolDTO {
     pub label_weight: i32,
     pub note: String,
     pub slicer_filament: String,
+    pub full_unused: String,
 }
 encrypted_input!(AddSpoolDTO);
 

@@ -74,9 +74,9 @@ impl SpoolScale {
             .unwrap_or_else(|e| error!("Failed sending button response request to scale {e:?}"));
     }
 
-    pub fn get_print_info(&self) {
+    pub fn request_print_info(&self) {
         self.console_to_scale
-            .try_send(ConsoleToScale::GetPrintInfo{ test: "It worked !!!".to_string()})
+            .try_send(ConsoleToScale::RequestPrintInfo{ test: "It worked !!!".to_string()})
             .unwrap_or_else(|e| error!("Failed sending get print info request to scale {e:?}"));
     }
 
@@ -576,7 +576,7 @@ pub async fn spool_scale_task(
                     let json_res = serde_json::to_string(&console_to_scale);
                     match json_res {
                         Ok(mut json) => {
-                            if matches!(console_to_scale, ConsoleToScale::GetPrintInfo { .. }) {
+                            if matches!(console_to_scale, ConsoleToScale::RequestPrintInfo { .. }) {
                                 json = encrypt(&app_config.borrow().scale_encryption_key.borrow(), &json);
                             }
                             let send_to_scale_header = FrameHeader {

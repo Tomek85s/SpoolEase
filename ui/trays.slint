@@ -35,7 +35,7 @@ component AmsButton inherits Window {
                     height: parent.height;
                     width: parent.width;
                     border-color: black;
-                    border-width: 1px;
+                    border-width: trays-state[ams-id * 4 + tray-id + 1].spool-state == UiTrayState.Loaded ? 3px : 1px;
                     if !slot-with-known-color(trays-state[ams-id * 4 + tray-id + 1]) && slot-with-spool(trays-state[ams-id * 4 + tray-id + 1]): MyText {
                         text: "?";
                         color: white;
@@ -85,14 +85,21 @@ component Spool inherits Rectangle {
             background: tray-state.spool-state == UiTrayState.Unknown || tray-state.spool-state == UiTrayState.Empty || tray-state.spool-state == UiTrayState.Spool || tray-state.spool-state == UiTrayState.Reading || tray-state.filament.state == UiFilamentState.Unknown ? #fff : tray-state.filament.color;
             border-radius: root.width / 2;
             border-color: utils.contrasting_color(root.background);
-            border-width: area.pressed ? 4px : 2px;
+            border-width: area.pressed || tray-state.spool-state == UiTrayState.Loaded ? 4px : 2px;
+            property <string> default-big-text: tray-state.spool-state == UiTrayState.Unknown ? "?" : tray-state.spool-state == UiTrayState.Empty ? "−" : tray-state.spool-state == UiTrayState.Spool ? "↺" : tray-state.spool-state == UiTrayState.Reading ? "↻" : "✓";
+            property <bool> display-weight: default-big-text == "✓" && tray-state.weight-display != "";
 
             utils := Utils { }
 
-            Text {
-                text: tray-state.spool-state == UiTrayState.Unknown ? "?" : tray-state.spool-state == UiTrayState.Empty ? "−" : tray-state.spool-state == UiTrayState.Spool ? "↺" : tray-state.spool-state == UiTrayState.Reading ? "↻" : "✓";
+            if !display-weight: Text {
+                text: default-big-text;
                 color: utils.contrasting_color(parent.background);
                 font-size: 60px;
+            }
+
+            if display-weight: MyText {
+                text: tray-state.weight-display;
+                color: utils.contrasting_color(parent.background);
             }
         }
 

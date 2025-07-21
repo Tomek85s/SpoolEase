@@ -60,8 +60,9 @@ pub struct PrintData {
     // pub print_error: Option<i64>,
     // pub lifecycle: Option<String>,
     // pub wifi_signal: Option<String>,
-    // pub gcode_state: Option<String>,
-    // pub gcode_file_prepare_percent: Option<String>,
+    pub gcode_state: Option<GcodeState>,
+    #[serde(default, serialize_with = "option_u32_as_str_se", deserialize_with = "option_u32_as_str_de")]
+    pub gcode_file_prepare_percent: Option<u32>,
     // pub queue_number: Option<i64>,
     // pub queue_total: Option<i64>,
     // pub queue_est: Option<i64>,
@@ -70,7 +71,9 @@ pub struct PrintData {
     // pub profile_id: Option<String>,
     // pub task_id: Option<String>,
     // pub subtask_id: Option<String>,
-    // pub subtask_name: Option<String>,
+    pub subtask_name: Option<String>,
+    pub ams_mapping: Option<Vec<i32>>,
+    pub ams_mapping2: Option<Vec<AmsMapping2Entry>>,
     // pub gcode_file: Option<String>,
     // pub stg: Option<Vec<Value>>,
     // pub stg_cur: Option<i64>,
@@ -81,8 +84,8 @@ pub struct PrintData {
     // pub sdcard: Option<bool>,
     // pub force_upgrade: Option<bool>,
     // pub mess_production_state: Option<String>,
-    // pub layer_num: Option<i64>,
-    // pub total_layer_num: Option<i64>,
+    pub layer_num: Option<i32>,
+    pub total_layer_num: Option<i32>,
     // pub s_obj: Option<Vec<Value>>,
     // pub fan_gear: Option<i64>,
     // pub hms: Option<Vec<Value>>,
@@ -93,6 +96,9 @@ pub struct PrintData {
     // pub lights_report: Option<Vec<PrintLightsReport>>,
     // pub upgrade_state: Option<PrintUpgradeState>,
     pub command: Option<String>,
+    pub param: Option<String>,  // "Metadata/plate_1.gcode"
+    #[serde(default, serialize_with = "option_u32_as_str_se", deserialize_with = "option_u32_as_str_de")]
+    pub plate_idx: Option<u32>, // "1",
     // pub msg: Option<i64>,
     pub sequence_id: Option<String>,
 
@@ -123,9 +129,12 @@ pub struct PrintAms {
     pub ams_exist_bits: Option<String>,
     pub tray_exist_bits: Option<String>,
     pub tray_is_bbl_bits: Option<String>,
-    // pub tray_tar: Option<String>,
-    // pub tray_now: Option<String>,
-    // pub tray_pre: Option<String>,
+    #[serde(default, serialize_with = "option_as_str_se", deserialize_with = "option_as_str_de")]
+    pub tray_tar: Option<i32>,
+    #[serde(default, serialize_with = "option_as_str_se", deserialize_with = "option_as_str_de")]
+    pub tray_now: Option<i32>,
+    #[serde(default, serialize_with = "option_as_str_se", deserialize_with = "option_as_str_de")]
+    pub tray_pre: Option<i32>,
     pub tray_read_done_bits: Option<String>,
     pub tray_reading_bits: Option<String>,
     // pub version: Option<i64>,
@@ -327,6 +336,45 @@ where
     option.as_deref().map(|s| s.parse::<u32>().map_err(serde::de::Error::custom)).transpose()
 }
 
+fn as_str_se<T, S>(x: &T, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: core::fmt::Display,
+{
+    s.serialize_str(&format!("{}", x))
+}
+
+#[allow(dead_code)]
+fn as_str_de<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: core::str::FromStr,
+    <T as core::str::FromStr>::Err: core::fmt::Display,
+{
+    let s: &str = Deserialize::deserialize(deserializer)?;
+    s.parse::<T>().map_err(serde::de::Error::custom)
+}
+
+fn option_as_str_se<T, S>(value: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: core::fmt::Display
+{
+    match value {
+        Some(v) => as_str_se::<T, S>(v, serializer),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn option_as_str_de<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: core::str::FromStr,
+    <T as core::str::FromStr>::Err: core::fmt::Display,
+{
+    let option: Option<String> = Option::deserialize(deserializer)?;
+    option.as_deref().map(|s| s.parse::<T>().map_err(serde::de::Error::custom)).transpose()
+}
 // "print": {
 //     "command": "ams_filament_setting",
 //     "ams_id": 0,
@@ -418,3 +466,23 @@ impl ExtrusionCaliSelCommand {
 //     "result": "success"
 //   }
 // }
+
+
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+pub struct AmsMapping2Entry {
+    ams_id: i32,
+    slot_id: i32,
+}
+
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone, Copy)]
+pub enum GcodeState {
+    Unknown,
+    IDLE,
+    PREPARE,
+    RUNNING,
+    FINISH,
+    FAILED,
+    #[serde(other)]
+    Unsupported,
+}

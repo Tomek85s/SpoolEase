@@ -58,7 +58,7 @@ src/certs
 !src/certs/raw.githubuercontent.com.info
 .envrc
 
-_untracked
+_untracked/
 deploy-debug.sh
 deploy-prod.sh
 static/pkg

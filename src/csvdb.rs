@@ -1,4 +1,4 @@
-use core::{cell::RefCell, fmt::Display, str::{FromStr, Utf8Error}};
+use core::{cell::RefCell, str::Utf8Error};
 
 use alloc::{
     format,
@@ -9,40 +9,11 @@ use alloc::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embedded_hal_async::spi::SpiDevice;
 use hashbrown::HashMap;
-use serde::{de::DeserializeOwned, Deserialize, Serialize, Deserializer};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use snafu::prelude::*;
 
 use framework::prelude::{SDCardStore, SDCardStoreErrorSource};
-
-pub fn deserialize_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: FromStr,
-    T::Err: Display,
-{
-    let s: String = String::deserialize(deserializer)?;
-    if s.is_empty() {
-        Ok(None)
-    } else {
-        s.parse()
-            .map(Some)
-            .map_err(|e| serde::de::Error::custom(format!("Parse error: {}", e)))
-    }
-}
-
-#[allow(dead_code)]
-pub fn deserialize_optional_unit<'de, D>(deserializer: D) -> Result<Option<()>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: String = String::deserialize(deserializer)?;
-    if s.trim().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(()))
-    }
-}
 
 #[derive(Snafu)]
 pub enum CsvDbError {

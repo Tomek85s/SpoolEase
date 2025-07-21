@@ -1,4 +1,6 @@
-use crate::csvdb::deserialize_optional;
+use shared::utils::{
+    deserialize_optional, deserialize_optional_bool_yn, deserialize_f32_base64, serialize_optional_bool_yn, serialize_f32_base64,
+};
 use alloc::borrow::ToOwned;
 use core::{any::Any, cell::RefCell};
 use embassy_time::Instant;
@@ -31,8 +33,6 @@ use crate::{
 
 #[derive(Snafu, Debug)]
 pub enum InternalError {
-    TagIdTooLong,
-    BadTagId,
     BadId,
 }
 
@@ -41,7 +41,7 @@ pub enum StoreError {
     #[snafu(display("Too many store operations pending"))]
     TooManyOps,
 
-    #[snafu(display("Error deleting spool: {source}"))]
+    #[snafu(display("CsvDbError : {source}"))]
     CsvDbError { source: CsvDbError },
 
     #[snafu(display("Internal store software logic error"))]
@@ -52,6 +52,12 @@ pub enum StoreError {
 
     #[snafu(display("Can't access databse (SD Card Installed?)"))]
     NoCsvDb,
+
+    #[snafu(display("Missing required id for operation in record"))]
+    MissingId,
+
+    #[snafu(display("Id not found in databse"))]
+    IdNotFound,
 }
 
 #[allow(clippy::enum_variant_names, dead_code)]
@@ -167,7 +173,7 @@ impl Store {
     }
 
     pub fn is_available(&self) -> bool {
-        true
+        self.spools_db.get().is_some()
     }
 
     pub fn query_spools(&self) -> Option<String> {
@@ -259,6 +265,9 @@ impl Store {
                         slicer_filament: spool_record.slicer_filament,
                         added_time: current_record.added_time,
                         encode_time: current_record.encode_time,
+                        added_full: spool_record.added_full,
+                        consumed_since_add: 0.0,
+                        consumed_since_weight: 0.0,
                     }
                 } else {
                     return Err(StoreError::NotFound { id: spool_record.id.clone() });
@@ -293,13 +302,42 @@ impl Store {
         }
         None
     }
+
+    pub async fn update_spool(&self, spool_record: SpoolRecord) -> Result<(), StoreError> {
+        if let Some(spools_db) = self.spools_db.get() {
+            if !spool_record.id.is_empty() {
+                if spools_db.records.borrow().contains_key(&spool_record.id) {
+                    let tag_id = spool_record.tag_id.clone();
+                    let id = spool_record.id.clone();
+                    // TODO: ? theoretically need transaction mechanism here (so lock db and then do the index operation as well)
+                    spools_db.insert(spool_record).await.context(CsvDbSnafu)?;
+                    if !tag_id.is_empty() {
+                        self.tag_id_index.borrow_mut().insert(tag_id, id);
+                    } else {
+                        let tag_id = self.tag_id_index.borrow().iter().find(|(_, index_id) | *index_id == &id).map(|(index_tag, _)| index_tag.clone());
+                        if let Some(tag_id) = tag_id {
+                            self.tag_id_index.borrow_mut().remove(&tag_id);
+                        }
+                    }
+                    Ok(())
+                } else {
+                    error!("Internal error, can't access store");
+                    Err(StoreError::NoCsvDb)
+                }
+            } else {
+                Err(StoreError::IdNotFound)
+            }
+        } else {
+            Err(StoreError::MissingId)
+        }
+    }
 }
 
 #[embassy_executor::task] // up to two printers in parallel
 pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
     let db_available;
     {
-        debug!("Strted store_task");
+        debug!("Started store_task");
         let file_store = framework.borrow().file_store();
         match CsvDb::<SpoolRecord, _, FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES>::new(file_store.clone(), "/store/spools", 1024, 200, true, true)
             .await
@@ -362,9 +400,13 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                     let matching_spool_id = store.tag_id_index.borrow().get(&request_tag_id).cloned();
                     let matching_tag_id = if let Some(request_spool_id) = request_spool_id.as_ref() {
                         if let Some((tag_id, _spool_id)) = store.tag_id_index.borrow().iter().find(|v| v.1 == request_spool_id) {
-                        Some(tag_id.clone()) 
-                        } else { None }
-                    } else { None };
+                            Some(tag_id.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
 
                     // This is tricky - here is the logic, below in code comments are repeated for clarity
                     // The outtpub is eventually use_spool_id - which record to write to eventually, existing and which or new
@@ -374,12 +416,12 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                     //     if encode-tag
                     //       strike matching_spool_id
                     //       create new record
-                    //     if read-tag 
+                    //     if read-tag
                     //       use matching spool_id
                     //   else
                     //     create new record
                     //
-                    // If there is ID 
+                    // If there is ID
                     //   if it isn't tagged
                     //     if found matching_spool_id for request_tag_id
                     //       strike matching_spool_id
@@ -398,7 +440,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                             if let Some(matching_spool_id) = matching_spool_id {
                                 //   if found matching_spool_id for tag_id
                                 match tag_operation {
-                                    TagOperation::EncodeTag {weight: _}=> {
+                                    TagOperation::EncodeTag { weight: _ } => {
                                         //     if encode-tag
                                         //       strike matching_spool_id
                                         // TODO: to function
@@ -418,7 +460,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                                         //       use matching spool_id
                                         use_spool_id = Some(matching_spool_id.clone());
                                     }
-                                    TagOperation::UpdateWeight {weight: _ }=> {
+                                    TagOperation::UpdateWeight { weight: _ } => {
                                         error!("Error: Update weight without ID");
                                         store.notify_tag_stored(Err("Internal Software Error, update weight Spool-ID not found"), cookie);
                                         continue;
@@ -457,7 +499,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                                         use_spool_id = Some(request_spool_id.clone());
                                     } else {
                                         //     if matching_tag_id == request_tag_id
-                                        if matching_tag_id == request_tag_id { 
+                                        if matching_tag_id == request_tag_id {
                                             use_spool_id = Some(request_spool_id.clone());
                                         } else {
                                             //       if found matching_spool_id for request_tag_id
@@ -550,40 +592,45 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                     spool_rec = SpoolRecord {
                         id: id.clone(),
                         tag_id: request_tag_id.clone(),
-
                         slicer_filament: tag_info_filament_info.tray_info_idx,
                         material_type: tag_info_filament_info.tray_type,
-
                         material_subtype: tag_info.filament_subtype.unwrap_or_default(),
                         color_name: tag_info.color_name.unwrap_or_default(),
                         color_code: tag_info_filament_info.tray_color,
-                        note: tag_info.note.unwrap_or_default(),
+                        note: tag_info.note.unwrap_or_default(), // this is the only (?) field where data in the encode can be changed in store, so there's special handling later
                         brand: tag_info.brand.unwrap_or_default(),
                         weight_advertised: tag_info.weight_advertised,
                         weight_core: tag_info.weight_core,
                         weight_new: tag_info.weight_new,
                         encode_time: tag_info.encode_time,
-                        weight_current: curr_record.as_ref().and_then(|rec| rec.weight_current), // potentially modified later
+                        weight_current: curr_record.as_ref().and_then(|rec| rec.weight_current),
                         added_time: curr_record.as_ref().and_then(|rec| rec.added_time).or(store_safe_time_now()),
+                        added_full: curr_record.as_ref().and_then(|rec| rec.added_full),
+                        consumed_since_add: curr_record.as_ref().map_or_else(|| 0.0, |rec| rec.consumed_since_add),
+                        consumed_since_weight: curr_record.as_ref().map_or_else(|| 0.0, |rec| rec.consumed_since_weight),
                     };
 
                     match tag_operation {
-                        TagOperation::EncodeTag { weight }=> {
+                        TagOperation::EncodeTag { weight } => {
                             if let Some(weight) = weight {
                                 spool_rec.weight_current = Some(weight);
+                                spool_rec.consumed_since_weight = 0.0; // updating current weight should clear the consumed since_weight
                             }
                             spool_rec.encode_time = store_safe_time_now();
                         }
                         TagOperation::ReadTag => {
+                            // if we read a tag, with a note, the record note takes precedence and should override what's in the tag
                             if let Some(existing_spool_rec) = curr_record {
                                 spool_rec.note = existing_spool_rec.note;
                             }
                         }
                         TagOperation::UpdateWeight { weight } => {
+                            // if we update weight, with a note coming from tag, the record note takes precedence and should override what's in the tag
                             if let Some(existing_spool_rec) = curr_record {
                                 spool_rec.note = existing_spool_rec.note;
                             }
                             spool_rec.weight_current = Some(weight);
+                            spool_rec.consumed_since_weight = 0.0; // updating ccurrent weight should clear the consumed since_weight
                         }
                     }
 
@@ -679,6 +726,20 @@ pub struct SpoolRecord {
     pub added_time: Option<i32>,
     #[serde(default, deserialize_with = "deserialize_optional")]
     pub encode_time: Option<i32>,
+    #[serde(default, serialize_with = "serialize_optional_bool_yn", deserialize_with = "deserialize_optional_bool_yn")]
+    pub added_full: Option<bool>,
+    #[serde(
+        default,
+        serialize_with = "serialize_f32_base64",
+        deserialize_with = "deserialize_f32_base64"
+    )]
+    pub consumed_since_add: f32,
+    #[serde(
+        default,
+        serialize_with = "serialize_f32_base64",
+        deserialize_with = "deserialize_f32_base64"
+    )]
+    pub consumed_since_weight: f32,
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
     // pub price: Option<()>,
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
