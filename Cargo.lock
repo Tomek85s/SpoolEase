@@ -5650,12 +5650,16 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "deku",
+ "edge-http",
+ "edge-nal",
+ "edge-nal-embassy",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
  "embassy-sync",
  "embassy-time",
  "embedded-hal-bus",
+ "embedded-io-async",
  "esp-alloc",
  "esp-hal",
  "esp-hal-app-framework",
@@ -5670,6 +5674,7 @@ dependencies = [
  "serde_json",
  "snafu",
  "static_cell",
+ "url",
 ]
 
 [[package]]

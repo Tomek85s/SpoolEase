@@ -18,7 +18,7 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use shared::gcode_analysis::FilamentUsageEntry;
 use shared::gcode_analysis_task::{
-    fetch_gcode_analysis_task, FilamentUsage, GcodeAnalysisRequest, GcodeAnalysisRequestChannel, GcodeAnalyzerObserver,
+    fetch_gcode_analysis_task, FilamentUsage, GcodeAnalysisRequest, GcodeAnalysisRequestChannel, GcodeAnalyzerObserver, GcodeFetch
 };
 use slint::{ComponentHandle, Model, SharedString, ToSharedString};
 
@@ -389,15 +389,14 @@ impl ViewModel {
             let trait_for_gcode_analyzer_rc: Rc<RefCell<dyn GcodeAnalyzerObserver>> = self.view_model.as_ref().unwrap().clone();
             let trait_for_gcode_analyzer_weak: Weak<RefCell<dyn GcodeAnalyzerObserver>> = Rc::downgrade(&trait_for_gcode_analyzer_rc);
 
-            self.framework
-                .borrow()
-                .spawner
-                .spawn(fetch_gcode_analysis_task(
+            let task = Box::leak(Box::new(TaskStorage::new())).spawn(|| {
+                fetch_gcode_analysis_task(
                     self.framework.clone(),
                     self.gcode_analysis_request_channel.clone(),
                     trait_for_gcode_analyzer_weak,
-                ))
-                .ok();
+                )
+            });
+            self.framework.borrow().spawner.spawn(task).ok();
         }
 
         // Initialize SpoolScale and weight related stuff
@@ -1407,6 +1406,7 @@ impl BambuPrinterObserver for ViewModel {
         info!("[{printer_number}] Received request for gcode analysis {subtask_name}, plate {plate_idx}");
 
         let gcode_analysis_request = GcodeAnalysisRequest {
+            gcode_fetch: GcodeFetch::CloudHttp,
             ip,
             serial,
             access_code,
@@ -1431,9 +1431,7 @@ impl BambuPrinterObserver for ViewModel {
         // }
 
         match self.gcode_analysis_request_channel.try_send(gcode_analysis_request) {
-            Ok(_) => {
-                self.gcode_last_job_number
-            }
+            Ok(_) => self.gcode_last_job_number,
             Err(err) => {
                 error!("Failed sending request for gcode analysis within console : {err:?}");
                 0
@@ -2051,11 +2049,7 @@ impl GcodeAnalyzerObserver for ViewModel {
         if let Some(printer) = self.bambu_printer_model.printers.get(printer_index) {
             let mut printer_borrow = printer.borrow_mut();
             let printer_log_id = printer_borrow.printer_number;
-            info!(
-                "[{}] Setting gcode analysis with {} entries",
-                printer_log_id,
-                filament_usage.data.len()
-            );
+            info!("[{}] Setting gcode analysis with {} entries", printer_log_id, filament_usage.data.len());
             if let Some(curr_print_project) = &mut printer_borrow.curr_print_project {
                 // TODO: turn to a function on print_project or on printer
                 match &curr_print_project.gcode_analysis {
@@ -2063,9 +2057,20 @@ impl GcodeAnalyzerObserver for ViewModel {
                         warn!("[{}>] Print monitoring awaiting printer, ignoring gcode analysis", printer_log_id);
                         return;
                     }
-                    GcodeAnalysis::Requested { at: _, job_number:awaited_job_number } | GcodeAnalysis::Received { at: _, job_number: awaited_job_number , usage:_ } => {
+                    GcodeAnalysis::Requested {
+                        at: _,
+                        job_number: awaited_job_number,
+                    }
+                    | GcodeAnalysis::Received {
+                        at: _,
+                        job_number: awaited_job_number,
+                        usage: _,
+                    } => {
                         if *awaited_job_number != job_number {
-                            warn!("[{}] Print monitoring awaiting job number {}, received a different job number {}, ignoring gcode analysis", printer_log_id, awaited_job_number, job_number);
+                            warn!(
+                                "[{}] Print monitoring awaiting job number {}, received a different job number {}, ignoring gcode analysis",
+                                printer_log_id, awaited_job_number, job_number
+                            );
                             return;
                         }
                     }
