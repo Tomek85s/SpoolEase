@@ -285,6 +285,7 @@ impl BambuPrinter {
             // actions post updates,
             // be aware that still can't rely on updated self.tray_tar/now/pre which will be updated later
 
+            // debug!(">>>>> gcode_state_change {gcode_state_change}, new_gcode_state {new_gcode_state:?}, curr_print_project.gcode_analysis {:?}", curr_print_project.gcode_analysis);
             if gcode_state_change && new_gcode_state == GcodeState::RUNNING {
                 // if not requested earlier, request scale to fetch gcode from printer and analyze it
                 // In case of ftp it will be requested here, if http already earlier when project_file arrived
@@ -394,7 +395,6 @@ impl BambuPrinter {
                     }
                 }
             }
-        } else {
         }
         consumed
     }

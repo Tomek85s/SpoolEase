@@ -663,7 +663,6 @@ impl BambuPrinter {
             return TrayState::Ready;
         }
 
-
         // let mut loading = None;
         // let mut unloading = None;
         let mut loaded = None;
@@ -1929,7 +1928,9 @@ pub async fn incoming_messages_task(
                             payload,
                         }) => {
                             let parse_res = serde_json::from_slice::<bambu_api::Print>(payload);
-                            warn!("{}", core::str::from_utf8(payload).unwrap_or("Non UTF-8 Packet arrived from printer"));
+                            if log_level >= log::Level::Trace {
+                                trace!("[SIM] {}", core::str::from_utf8(payload).unwrap_or("Non UTF-8 Packet arrived from printer"));
+                            }
                             if let Ok(print) = parse_res {
                                 if log_level >= log::Level::Trace {
                                     trace!("[{}] {:?}", printer_log_id, print);

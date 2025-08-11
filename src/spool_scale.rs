@@ -22,7 +22,7 @@ use framework::{debug, error, framework_web_app::encrypt, info, mk_static, prelu
 use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 use shared::{
-    gcode_analysis::FilamentUsageEntry, gcode_analysis_task::GcodeAnalysisRequest, scale::{ConsoleToScale, ScaleToConsole}
+    gcode_analysis::FilamentUsageEntry, gcode_analysis_task::{GcodeAnalysisNotification, GcodeAnalysisRequest}, scale::{ConsoleToScale, ScaleToConsole}
 };
 
 use crate::{app_config::AppConfig, ssdp::SSDPPubSubChannel};
@@ -59,6 +59,9 @@ pub trait SpoolScaleObserver {
     fn on_pn532_status(&mut self, status: bool);
     fn on_button_pressed(&mut self, scale_weight: ScaleWeight) -> Option<bool>;
     fn on_gcode_analysis(&mut self, job_number: i32, printer_index: usize, gcode_analysis: Vec<FilamentUsageEntry>);
+    fn on_gcode_analysis_failed(&mut self, job_number: i32, printer_index: usize);
+    fn on_gcode_analysis_canceled(&mut self, job_number: i32, printer_index: usize);
+    fn on_gcode_analysis_completed(&mut self, job_number: i32, printer_index: usize);
 }
 
 impl SpoolScale {
@@ -80,6 +83,17 @@ impl SpoolScale {
             .try_send(ConsoleToScale::RequestGcodeAnalysis { gcode_analysis_request })
         {
             Err(format!("Failed sending request_gcode_analysis to scale {err:?}"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn gcode_analysis_notify(&self, gcode_analysis_notification: GcodeAnalysisNotification) -> Result<(), String> {
+        if let Err(err) = self
+            .console_to_scale
+            .try_send(ConsoleToScale::GcodeAnalysisNotify { gcode_analysis_notification })
+        {
+            Err(format!("Failed sending gcode_analysis_notify to scale {err:?}"))
         } else {
             Ok(())
         }
@@ -132,6 +146,15 @@ impl SpoolScale {
                     filament_usage_csv,
                 } => {
                     self.notify_gcode_analysis(job_number, printer_index, filament_usage_csv);
+                }
+                ScaleToConsole::GcodeAnalysisFailed { job_number, printer_index } => {
+                    self.notify_gcode_analysis_failed(job_number, printer_index);
+                }
+                ScaleToConsole::GcodeAnalysisCanceled { job_number, printer_index } => {
+                    self.notify_gcode_analysis_canceled(job_number, printer_index);
+                }
+                ScaleToConsole::GcodeAnalysisCompleted { job_number, printer_index } => {
+                    self.notify_gcode_analysis_completed(job_number, printer_index);
                 }
             }
         } else {
@@ -255,6 +278,25 @@ impl SpoolScale {
             }
             let observer = last.upgrade().unwrap();
             observer.borrow_mut().on_gcode_analysis(job_number, printer_index, data);
+        }
+    }
+    pub fn notify_gcode_analysis_failed(&self, job_number: i32, printer_index: usize) {
+        for weak_observer in self.observers.iter() {
+            let observer = weak_observer.upgrade().unwrap();
+            observer.borrow_mut().on_gcode_analysis_failed(job_number, printer_index);
+        }
+        
+    }
+    pub fn notify_gcode_analysis_canceled(&self, job_number: i32, printer_index: usize) {
+        for weak_observer in self.observers.iter() {
+            let observer = weak_observer.upgrade().unwrap();
+            observer.borrow_mut().on_gcode_analysis_canceled(job_number, printer_index);
+        }
+    }
+    pub fn notify_gcode_analysis_completed(&self, job_number: i32, printer_index: usize) {
+        for weak_observer in self.observers.iter() {
+            let observer = weak_observer.upgrade().unwrap();
+            observer.borrow_mut().on_gcode_analysis_completed(job_number, printer_index);
         }
     }
 }
