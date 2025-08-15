@@ -1873,7 +1873,7 @@ pub fn init(
     let read_packets = Rc::new(embassy_sync::pubsub::PubSubChannel::<
         embassy_sync::blocking_mutex::raw::NoopRawMutex,
         crate::my_mqtt::BufferedMqttPacket,
-        5,
+        20,
         2,
         1,
     >::new());
@@ -1970,7 +1970,7 @@ fn clean_bytes_to_string(input: &[u8]) -> String {
 
 #[embassy_executor::task(pool_size = MAX_NUM_PRINTERS)]
 pub async fn incoming_messages_task(
-    read_packets: Rc<PubSubChannel<NoopRawMutex, BufferedMqttPacket, 5, 2, 1>>,
+    read_packets: Rc<PubSubChannel<NoopRawMutex, BufferedMqttPacket, 20, 2, 1>>,
     bambu_printer: Rc<RefCell<BambuPrinter>>,
 ) {
     let mut subscriber = read_packets.subscriber().unwrap();
@@ -1998,7 +1998,7 @@ pub async fn incoming_messages_task(
                             let parse_res = serde_json::from_slice::<bambu_api::Print>(payload);
                             if log_level >= log::Level::Trace {
                                 let cleaned_log = clean_bytes_to_string(payload);
-                                trace!("[{printer_log_id}] [SIM] {cleaned_log}");
+                                trace!("[{printer_log_id}] [Q:{}] [SIM] {cleaned_log}", subscriber.len());
                             }
                             if let Ok(print) = parse_res {
                                 if log_level >= log::Level::Trace {
@@ -2044,13 +2044,18 @@ pub async fn incoming_messages_task(
                             let spawner = embassy_executor::Spawner::for_current_executor().await;
                             spawner.spawn(fetch_initial_info(bambu_printer.clone())).ok();
                         }
-                        _ => (),
+                        _ => {
+                           if log_level >= log::Level::Trace {
+                                trace!("[{printer_log_id}] Ignoring {:?}", packet);
+                            } 
+                        },
                     }
                 } else {
                     error!("Unparsable MQTT message, this means an internal bug");
                 }
             }
-            Err(_) => {
+            Err(err) => {
+                error!("[{printer_log_id}] Error receving packets from printer : {err:?}");
                 if printer_known_to_be_up {
                     if log_level >= log::Level::Warn {
                         warn!("[{}] Printer connectivity issues suspected (uncertain), checking", printer_log_id);
@@ -2073,7 +2078,7 @@ pub async fn restartable_mqtt_task(
     framework: Rc<RefCell<Framework>>,
     rx_socket_buffer_size: usize,
     tx_socket_buffer_size: usize,
-    read_packets: Rc<PubSubChannel<NoopRawMutex, BufferedMqttPacket, 5, 2, 1>>,
+    read_packets: Rc<PubSubChannel<NoopRawMutex, BufferedMqttPacket, 20, 2, 1>>,
     write_packets: Rc<Channel<NoopRawMutex, BufferedMqttPacket, 3>>,
     bambu_printer: Rc<RefCell<BambuPrinter>>,
     restart_printer: Rc<embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::NoopRawMutex, i32>>,
@@ -2111,7 +2116,7 @@ pub async fn bambu_mqtt_task(
     bambu_printer: Rc<RefCell<BambuPrinter>>,
     rx_socket_buffer_size: usize,
     tx_socket_buffer_size: usize,
-    read_packets: Rc<PubSubChannel<NoopRawMutex, BufferedMqttPacket, 5, 2, 1>>,
+    read_packets: Rc<PubSubChannel<NoopRawMutex, BufferedMqttPacket, 20, 2, 1>>,
     write_packets: Rc<Channel<NoopRawMutex, BufferedMqttPacket, 3>>,
     ssdp_pub_sub: &'static SSDPPubSubChannel,
 ) {
