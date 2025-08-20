@@ -30,12 +30,13 @@ pub struct Filament {
     pub filament_id: String,
     pub name: String,
     pub k_value: String,
-    pub n_coef: String,
+    // pub n_coef: String, // doen't exist in H2D
     #[serde(skip_serializing_if = "Option::is_none")]
     pub setting_id: Option<String>,
     // pub tray_id: Option<i32>, // ??? why is it here? In extrusion_cali_set it can exist (case when adding new calibration)
     pub cali_idx: i32, // Need to switch to optional since in extrusion_cali_set it is missing at least sometimes (case when adding new calibration)
     pub nozzle_id: Option<String>,
+    pub extruder_id: Option<i32>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
