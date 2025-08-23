@@ -1029,9 +1029,9 @@ impl ViewModel {
                 // Standard trays
                 // let bambu = moved_bambu.borrow();
                 let tray = &bambu_borrow.ams_trays()[tray_id as usize];
-                // if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
-                //     encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
-                // }
+                if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
+                    encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
+                }
                 if let bambu::Filament::Known(filament_info) = &tray.filament {
                     (Some(filament_info.clone()), &tray.meta_info.tag_info)
                 } else {
