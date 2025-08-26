@@ -76,6 +76,7 @@ export component EncodeButtons inherits HorizontalLayout {
         text: "Cancel";
         clicked => {
             AppState.encode-cancel();
+            AppState.stop-highlight-tray(); // required because of scenario: Encode (highlighting single tray), add weight (that cancels encode), pressing cancel
         }
     }
 }

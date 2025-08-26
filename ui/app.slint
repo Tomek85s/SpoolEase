@@ -348,11 +348,11 @@ export global AppState {
         self.curr-encode-request.tray-index = tray-index;
         self.curr-encode-request.tray-id = ((tray-index >= 998) ? tray-index : self.trays-state[tray-index].id);
         self.control-state = ControlState.EncodeEditing;
-        if self.spool-scale-state == SpoolScaleState.Loaded {
-            self.encoding-spool-core-visible = true;
-        } else {
-            self.encoding-spool-core-visible = false;
-        }
+        // if self.spool-scale-state == SpoolScaleState.Loaded {
+        //     self.encoding-spool-core-visible = true;
+        // } else {
+        //     self.encoding-spool-core-visible = false;
+        // }
         AppBackend.notify-start-encode(self.curr-encode-request.tray-id);
     }
     public function encode-set-core-info(weight-advertised: int, weight-core: int, weight-new: int, core-name: string) {
@@ -434,14 +434,15 @@ export global AppState {
         self.spool-scale-flash = true;
         self.spool-scale-after-flash-state = SpoolScaleState.Loaded;
         if AppState.control-state == ControlState.EncodeEditing {
-            AppState.encoding-spool-core-visible = true;
             // if loaded while Encode Editing
+            // AppState.encoding-spool-core-visible = true;
         } else if AppState.control-state == ControlState.Encoding {
             // if started with simple encoding, and then loaded a spool on the scale
             // interpret this as forgot to encode also weight
+            clear-curr-encoding-request();
             AppState.control-state = ControlState.EncodeEditing;
             // AppState.stop-highlight-tray();
-            AppState.encoding-spool-core-visible = true;
+            // AppState.encoding-spool-core-visible = true;
             AppBackend.encode-web-app();
         }
     }
