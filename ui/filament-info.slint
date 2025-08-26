@@ -3,6 +3,7 @@ import { AppBackend, AppState, ControlState, UiTray } from "app.slint";
 import { Utils } from "utils.slint";
 import { FrameworkState } from "framework/framework.slint";
 import { FilamentInfoMode } from "app.slint";
+import { SelectIfNewSpool } from "core-weight.slint";
 
 export component LabeledText inherits Rectangle {
     callback clicked;
@@ -55,6 +56,9 @@ export component ViewTitle inherits Title {
 }
 
 export component EncodeButtons inherits HorizontalLayout {
+    callback encode-clicked;
+    callback cancel-clicked;
+
     Window {
         horizontal-stretch: 1;
     }
@@ -65,8 +69,7 @@ export component EncodeButtons inherits HorizontalLayout {
         height: 56px;
         text: "Encode";
         clicked => {
-            AppState.control-state = ControlState.Encoding;
-            AppState.encode-start();
+            encode-clicked()
         }
     }
 
@@ -75,8 +78,7 @@ export component EncodeButtons inherits HorizontalLayout {
         height: 56px;
         text: "Cancel";
         clicked => {
-            AppState.encode-cancel();
-            AppState.stop-highlight-tray(); // required because of scenario: Encode (highlighting single tray), add weight (that cancels encode), pressing cancel
+            cancel-clicked()
         }
     }
 }
@@ -92,8 +94,14 @@ export component ViewButtons inherits HorizontalLayout {
     }
 }
 
+enum FilamentInfoState {
+  DisplayInfo,
+  SelectIfNewSpool,
+}
+
 export component FilamentInfo inherits Rectangle {
     in-out property <FilamentInfoMode> mode;
+    property <FilamentInfoState> state: FilamentInfoState.DisplayInfo;
     width: 480px;
     height: 320px;
     background: white;
@@ -201,9 +209,9 @@ export component FilamentInfo inherits Rectangle {
 
                     LabeledInfo {
                         label-button: mode == FilamentInfoMode.Encode;
-                        property <string> core: AppState.curr-encode-request.weight-core != 0 ? "\{AppState.curr-encode-request.weight-core}g" : "—";
-                        property <string> new: AppState.curr-encode-request.weight-new != 0 ? "\{AppState.curr-encode-request.weight-new}g" : "—";
-                        property <string> advertised: AppState.curr-encode-request.weight-advertised == 0 ? "—" : ((AppState.curr-encode-request.weight-advertised > 500) && (Math.mod(AppState.curr-encode-request.weight-advertised,500)) == 0) ? "\{AppState.curr-encode-request.weight-advertised / 1000}kg" : "\{AppState.curr-encode-request.weight-advertised}g";
+                        property <string> core: AppState.curr-encode-request.weight-core > 0 ? "\{AppState.curr-encode-request.weight-core}g" : "—";
+                        property <string> new: AppState.curr-encode-request.weight-new > 0 ? "\{AppState.curr-encode-request.weight-new}g" : "—";
+                        property <string> advertised: AppState.curr-encode-request.weight-advertised <= 0 ? "—" : ((AppState.curr-encode-request.weight-advertised > 500) && (Math.mod(AppState.curr-encode-request.weight-advertised,500)) == 0) ? "\{AppState.curr-encode-request.weight-advertised / 1000}kg" : "\{AppState.curr-encode-request.weight-advertised}g";
                         label: "Weights:";
                         text: "\{advertised} (Label) / \{core} (Core) / \{new} (New)";
                         clicked => {
@@ -214,7 +222,35 @@ export component FilamentInfo inherits Rectangle {
             }
         }
 
-        if mode == FilamentInfoMode.Encode: EncodeButtons { }
+        if mode == FilamentInfoMode.Encode: EncodeButtons {
+            encode-clicked => {
+                if AppState.curr-encode-request.weight-new == -1 {
+                    state = FilamentInfoState.SelectIfNewSpool;
+                } else {
+                    AppState.control-state = ControlState.Encoding;
+                    AppState.encode-start();
+                }
+            }
+            cancel-clicked => {
+                AppState.encode-cancel();
+                AppState.stop-highlight-tray(); // required because of scenario: Encode (highlighting single tray), add weight (that cancels encode), pressing cancel
+            }
+        }
         if mode == FilamentInfoMode.View: ViewButtons { }
+    }
+
+    if mode == FilamentInfoMode.Encode && root.state == FilamentInfoState.SelectIfNewSpool: SelectIfNewSpool {
+        cancel-clicked => {
+            root.state = FilamentInfoState.DisplayInfo;
+        }
+
+        yes-clicked => {
+            AppState.curr-encode-request.weight-new = AppState.spool-scale-weight;
+            root.state = FilamentInfoState.DisplayInfo;
+        }
+        no-clicked => {
+            AppState.curr-encode-request.weight-new = 0;
+            root.state = FilamentInfoState.DisplayInfo;
+        }
     }
 }

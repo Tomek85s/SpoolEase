@@ -43,6 +43,7 @@ export struct EncodeRequest { // EncodeRequest is actually used for FilamentInfo
   tray-id: int, // from index
   weight-advertised: int, 
   weight-core: int,
+  encoded-new: bool,
   weight-new: int, 
   core-name: string, // used to add to list of previously used spools, not encoded to tag
   // manually filled
@@ -366,7 +367,7 @@ export global AppState {
         self.curr-encode-request.id = "";
         self.curr-encode-request.weight-advertised = 0;
         self.curr-encode-request.weight-core = 0;
-        self.curr-encode-request.weight-new = 0;
+        self.curr-encode-request.weight-new = -1;
         self.curr-encode-request.core-name = 0;
         self.curr-encode-request.brand = "";
         self.curr-encode-request.filament-subtype = "";

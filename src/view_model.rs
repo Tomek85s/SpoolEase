@@ -770,7 +770,7 @@ impl ViewModel {
         } else {
             None
         };
-        tag_info_to_encode.weight_new = (encode_request.weight_new != 0).then_some(encode_request.weight_new);
+        tag_info_to_encode.weight_new = (encode_request.weight_new > 0).then_some(encode_request.weight_new);
         tag_info_to_encode.weight_advertised = (encode_request.weight_advertised != 0).then_some(encode_request.weight_advertised);
         tag_info_to_encode.weight_core = (encode_request.weight_core != 0).then_some(encode_request.weight_core);
         tag_info_to_encode.brand = (!encode_request.brand.trim().is_empty()).then(|| encode_request.brand.trim().to_string());
