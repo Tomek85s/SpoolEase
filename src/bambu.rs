@@ -434,6 +434,38 @@ impl BambuPrinter {
         }
     }
 
+    pub fn model(&self) -> PrinterModel {
+        // https://wiki.bambulab.com/en/general/find-sn
+        let sn_prefix = &self.printer_serial[..self.printer_serial.char_indices().nth(3).map_or(self.printer_serial.len(), |(i, _)| i)];
+        match sn_prefix {
+            "094" => PrinterModel::H2D,
+            "239" => PrinterModel::H2DPro,
+            "00M" => PrinterModel::X1C,
+            "X1E" => PrinterModel::X1E,
+            "01P" => PrinterModel::P1S,
+            "01S" => PrinterModel::P1P,
+            "039" => PrinterModel::A1,
+            "030" => PrinterModel::A1Mini,
+            _ => PrinterModel::Unknown,
+        }
+    }
+
+    pub fn model_series(&self) -> PrinterModelSeries {
+        match self.model() {
+            PrinterModel::Unknown => PrinterModelSeries::Unknown,
+            PrinterModel::X1 => PrinterModelSeries::X1,
+            PrinterModel::X1C => PrinterModelSeries::X1,
+            PrinterModel::X1E => PrinterModelSeries::X1,
+            PrinterModel::P1P => PrinterModelSeries::P1,
+            PrinterModel::P1S => PrinterModelSeries::P1,
+            PrinterModel::A1Mini => PrinterModelSeries::A1,
+            PrinterModel::A1 => PrinterModelSeries::A1,
+            PrinterModel::H2D => PrinterModelSeries::H2,
+            PrinterModel::H2DPro => PrinterModelSeries::H2,
+            PrinterModel::H2S => PrinterModelSeries::H2,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn reset_printer(&mut self) {
         let empty = Self::internal_new(
@@ -2039,40 +2071,52 @@ pub async fn incoming_messages_task(
                             topic_name: _,
                             payload,
                         }) => {
-                            let parse_res = serde_json::from_slice::<bambu_api::Print>(payload);
+                            let parse_res = Box::new(serde_json::from_slice::<bambu_api::Message>(payload));
+
                             if log_level >= log::Level::Trace {
                                 let cleaned_log = clean_bytes_to_string(payload);
                                 trace!("[{printer_log_id}] [Q:{}] [SIM] {cleaned_log}", subscriber.len());
                             }
-                            if let Ok(print) = parse_res {
+
+                            if let Ok(message) = *parse_res {
                                 if log_level >= log::Level::Trace {
-                                    trace!("[{}] {:?}", printer_log_id, print);
+                                    trace!("[{}] {:?}", printer_log_id, message);
                                 }
-                                let mut skip = false;
-                                if let Some(print_result) = &print.print.result {
-                                    if print_result == "fail" {
-                                        if log_level >= log::Level::Warn {
-                                            warn!("[{}] Printer reported an error message, ignoring message", printer_log_id);
-                                            warn!("[{}] {:?}", printer_log_id, print);
+
+                                match message {
+                                    bambu_api::Message::Print(print) => {
+                                        let mut skip = false;
+                                        if let Some(print_result) = &print.print.result {
+                                            if print_result == "fail" {
+                                                if log_level >= log::Level::Warn {
+                                                    warn!("[{}] Printer reported an error message, ignoring message", printer_log_id);
+                                                    warn!("[{}] {:?}", printer_log_id, print);
+                                                }
+                                                skip = true;
+                                            }
                                         }
-                                        skip = true;
+                                        if !skip {
+                                            let previous_tray_bits = TrayBits {
+                                                tray_reading_bits: bambu_printer.borrow().tray_reading_bits,
+                                                tray_read_done_bits: bambu_printer.borrow().tray_read_done_bits,
+                                                tray_exist_bits: bambu_printer.borrow().tray_exist_bits,
+                                            };
+                                            let (change_made, removed_tags) = (*bambu_printer.borrow_mut()).process_print_message(&print.print);
+                                            let updated_tray_bits = TrayBits {
+                                                tray_reading_bits: bambu_printer.borrow().tray_reading_bits,
+                                                tray_read_done_bits: bambu_printer.borrow().tray_read_done_bits,
+                                                tray_exist_bits: bambu_printer.borrow().tray_exist_bits,
+                                            };
+                                            if change_made {
+                                                (*bambu_printer.borrow_mut()).update_ams_trays_done(
+                                                    &previous_tray_bits,
+                                                    &updated_tray_bits,
+                                                    &removed_tags,
+                                                );
+                                            }
+                                        }
                                     }
-                                }
-                                if !skip {
-                                    let previous_tray_bits = TrayBits {
-                                        tray_reading_bits: bambu_printer.borrow().tray_reading_bits,
-                                        tray_read_done_bits: bambu_printer.borrow().tray_read_done_bits,
-                                        tray_exist_bits: bambu_printer.borrow().tray_exist_bits,
-                                    };
-                                    let (change_made, removed_tags) = (*bambu_printer.borrow_mut()).process_print_message(&print.print);
-                                    let updated_tray_bits = TrayBits {
-                                        tray_reading_bits: bambu_printer.borrow().tray_reading_bits,
-                                        tray_read_done_bits: bambu_printer.borrow().tray_read_done_bits,
-                                        tray_exist_bits: bambu_printer.borrow().tray_exist_bits,
-                                    };
-                                    if change_made {
-                                        (*bambu_printer.borrow_mut()).update_ams_trays_done(&previous_tray_bits, &updated_tray_bits, &removed_tags);
-                                    }
+                                    bambu_api::Message::Info(_info) => {}
                                 }
                             } else if log_level >= log::Level::Debug {
                                 if log_level >= log::Level::Trace {
@@ -2589,6 +2633,17 @@ pub enum PrinterModel {
     P1S,
     A1Mini,
     A1,
+    H2D,
+    H2DPro,
+    H2S,
+}
+
+pub enum PrinterModelSeries {
+    Unknown,
+    X1,
+    P1,
+    A1,
+    H2,
 }
 
 #[derive(Clone, Debug)]
@@ -2680,49 +2735,49 @@ pub async fn fix_k_on_restart(
                 if let Filament::Known(prev_filament_info) = &prev_tray.filament {
                     if curr_filament_info == prev_filament_info {
                         // Turn both Some(-1) and None to Some(-1)
-                            let prev_cali_idx_normalized = prev_tray.cali_idx.or(Some(-1));
-                            let curr_cali_idx_normalized = curr_tray.cali_idx.or(Some(-1));
+                        let prev_cali_idx_normalized = prev_tray.cali_idx.or(Some(-1));
+                        let curr_cali_idx_normalized = curr_tray.cali_idx.or(Some(-1));
 
-                            // if curr idx isn't set and previously it was set, return it to previous state
-                            if curr_cali_idx_normalized == Some(-1) && prev_cali_idx_normalized != Some(-1) {
-                                // set_tray_cali_idx[id] = prev_cali_idx_normalized; // -1 means to set -1, value means set to that cali_idx
-                                *set_tray = prev_cali_idx_normalized; // -1 means to set -1, value means set to that cali_idx
-                            } else {
-                                // set_tray_cali_idx[id] = None; // None means not do anything
-                                *set_tray = None; // None means not do anything
-                            }
+                        // if curr idx isn't set and previously it was set, return it to previous state
+                        if curr_cali_idx_normalized == Some(-1) && prev_cali_idx_normalized != Some(-1) {
+                            // set_tray_cali_idx[id] = prev_cali_idx_normalized; // -1 means to set -1, value means set to that cali_idx
+                            *set_tray = prev_cali_idx_normalized; // -1 means to set -1, value means set to that cali_idx
+                        } else {
+                            // set_tray_cali_idx[id] = None; // None means not do anything
+                            *set_tray = None; // None means not do anything
                         }
                     }
                 }
             }
         }
+    }
 
-        let write_packets = bambu_printer.borrow().write_packets.clone();
-        let nozzle_diameter = &bambu_printer.borrow().nozzle_diameter().clone().unwrap_or_default();
-        let printer_serial = bambu_printer.borrow().printer_serial.clone();
-        let log_filter = bambu_printer.borrow().log_filter;
+    let write_packets = bambu_printer.borrow().write_packets.clone();
+    let nozzle_diameter = &bambu_printer.borrow().nozzle_diameter().clone().unwrap_or_default();
+    let printer_serial = bambu_printer.borrow().printer_serial.clone();
+    let log_filter = bambu_printer.borrow().log_filter;
 
-        for (id, prev_tray) in prev_ams_trays
-            .iter()
-            .enumerate()
-            .chain(core::iter::once(&prev_virt_tray).map(|v| (255, v)))
+    for (id, prev_tray) in prev_ams_trays
+        .iter()
+        .enumerate()
+        .chain(core::iter::once(&prev_virt_tray).map(|v| (255, v)))
+    {
         {
-            {
-                let set_tray = if id == 255 { &set_virt_cali_idx } else { &set_tray_cali_idx[id] };
-                if set_tray.is_some() {
-                    if let Filament::Known(filament_info) = &prev_tray.filament {
-                        let original_tray_id = if id == 255 { 254 } else { id };
-                        let (ams_id, ams_tray_id) = BambuPrinter::get_ams_and_tray_id(original_tray_id);
-                        let spool_id = if ams_tray_id == 254 { 0 } else { ams_tray_id };
-                        // TODO: (if change) check ams_id against 255
-                        if ams_id != 255 {
-                            info!("[{}] Updating pressure advance of AMS {} slot {}", printer_number, ams_id, ams_tray_id);
-                        } else {
-                            info!("[{}] Updating pressure advance of external slot", printer_number);
-                        }
-                        let cmd = crate::bambu_api::ExtrusionCaliSelCommand::new(
-                            nozzle_diameter,
-                            ams_id as i32,
+            let set_tray = if id == 255 { &set_virt_cali_idx } else { &set_tray_cali_idx[id] };
+            if set_tray.is_some() {
+                if let Filament::Known(filament_info) = &prev_tray.filament {
+                    let original_tray_id = if id == 255 { 254 } else { id };
+                    let (ams_id, ams_tray_id) = BambuPrinter::get_ams_and_tray_id(original_tray_id);
+                    let spool_id = if ams_tray_id == 254 { 0 } else { ams_tray_id };
+                    // TODO: (if change) check ams_id against 255
+                    if ams_id != 255 {
+                        info!("[{}] Updating pressure advance of AMS {} slot {}", printer_number, ams_id, ams_tray_id);
+                    } else {
+                        info!("[{}] Updating pressure advance of external slot", printer_number);
+                    }
+                    let cmd = crate::bambu_api::ExtrusionCaliSelCommand::new(
+                        nozzle_diameter,
+                        ams_id as i32,
                         original_tray_id as i32, // here we need the original tray_id
                         spool_id as i32,
                         &filament_info.tray_info_idx, // tray_info_idx is filament_id in this command

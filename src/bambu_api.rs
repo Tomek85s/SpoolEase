@@ -5,6 +5,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 // https://github.com/markhaehnel/bambulab/blob/main/src/message.rs
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum Message {
+    Print(Print),
+    Info(Info)
+}
+
+
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Print {
     pub print: PrintData,
@@ -535,3 +543,60 @@ impl GetVersionCommand {
 //  }
 // }
 
+
+//////////////////////////////////////////////////////////////////////////////
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Info {
+    pub info: InfoData,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InfoData {
+    pub command: String,
+    pub sequence_id: String,
+    pub module: Vec<InfoModule>,
+    pub result: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InfoModule {
+    pub name: String,
+    pub project_name: Option<String>,
+    pub product_name: Option<String>,
+    pub sw_ver: String,
+    pub hw_ver: String,
+    pub sn: String,
+    pub flag: Option<i32>,
+    pub loader_ver: Option<String>,
+    pub ota_ver: Option<String>,
+}
+
+
+
+// { "info": { "command": "get_version", "module": [ 
+//     { "flag": 3, "hw_ver": "N/A", "name": "ota", "sn": "N/A", "sw_ver": "01.08.02.00" }, 
+//     { "flag": 0, "hw_ver": "AMS08", "name": "ams/0", "sn": "00600A452223458", "sw_ver": "00.00.06.44" }, 
+//     { "flag": 0, "hw_ver": "MC07", "name": "mc", "sn": "00206A442501491", "sw_ver": "00.00.27.26" }, 
+//     { "flag": 0, "hw_ver": "SMC01", "name": "sm", "sn": "N/A", "sw_ver": "00.00.27.26" }, 
+//     { "flag": 0, "hw_ver": "TH09", "name": "th", "sn": "00306D441004413", "sw_ver": "00.00.07.12" }, 
+//     { "flag": 0, "hw_ver": "AP05", "name": "ap", "sn": "00M09D460801484", "sw_ver": "00.00.32.39" } ], 
+//     "sequence_id": "20006" } }[0m
+
+
+// {"info":{"command":"get_version","sequence_id":"47663","module":[
+//     {"name":"ota","sw_ver":"01.08.01.00","hw_ver":"OTA","loader_ver":"00.00.00.00","sn":"01P00A3A2900822","product_name":"Bambu Lab P1S","visible":true,"new_ver":"01.08.02.00","flag":15},
+//     {"name":"esp32","sw_ver":"01.11.35.47","hw_ver":"AP04","loader_ver":"00.00.00.00","sn":"01P00A3A2900822","product_name":"","visible":false,"flag":0},
+//     {"name":"mc","sw_ver":"00.01.32.85","hw_ver":"MC07","loader_ver":"00.00.00.28","sn":"01D06B3A0901973","product_name":"","visible":false,"flag":0},
+//     {"name":"th","sw_ver":"00.00.09.95","hw_ver":"TH09","loader_ver":"00.00.00.14","sn":"01E06B382801461","product_name":"","visible":false,"flag":0},
+//     {"name":"ams/0","sw_ver":"00.01.06.62","hw_ver":"AMS08","loader_ver":"00.00.00.00","sn":"00600A3A1903180","product_name":"AMS (1)","visible":true,"flag":0},
+//     {"name":"ams/1","sw_ver":"00.01.06.62","hw_ver":"AMS08","loader_ver":"00.00.00.00","sn":"00600A482719744","product_name":"AMS (2)","visible":true,"flag":0}],"result":"success","reason":""}}[0m
+
+
+// { "info": { "command": "get_version", "module": [ 
+//     { "flag": 3, "hw_ver": "N/A", "loader_ver": "00.00.00.00", "name": "ota", "product_name": "Bambu Lab X1-Carbon", "sn": "00M09D492100781", "sw_ver": "01.10.00.00", "visible": true }, 
+//     { "flag": 0, "hw_ver": "N3F05", "loader_ver": "00.00.00.00", "name": "n3f/0", "product_name": "AMS 2 Pro (1)", "sn": "19C06A4B2408067", "sw_ver": "02.00.19.68", "visible": true }, 
+//     { "flag": 0, "hw_ver": "MC07", "loader_ver": "00.00.00.28", "name": "mc", "product_name": "", "sn": "00206A482312627", "sw_ver": "00.00.32.96", "visible": false }, 
+//     { "flag": 0, "hw_ver": "N/A", "loader_ver": "00.00.00.00", "name": "mc-sub", "product_name": "", "sn": "N/A", "sw_ver": "00.00.32.96", "visible": false }, 
+//     { "flag": 0, "hw_ver": "TH09", "loader_ver": "00.00.00.14", "name": "th", "product_name": "", "sn": "00306D483105759", "sw_ver": "00.00.07.12", "visible": false }, 
+//     { "flag": 0, "hw_ver": "AP05", "loader_ver": "00.00.01.08", "name": "ap", "product_name": "", "sn": "00M09D492100781", "sw_ver": "00.00.51.09", "visible": false } ], "sequence_id": "20034" } }
