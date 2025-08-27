@@ -131,7 +131,7 @@ export global AppBackend {
     callback clear-staging();
     callback set-staging-to-tray(tray-id: int);
     callback encode-tag(encode_request: EncodeRequest) -> int; // returns how long it will try to encode, for timer
-    callback notify-post-encode();
+    callback clear-encode-scratchpad();
     callback notify-start-encode(tray_id: int) -> bool;
     callback read-tag-mode();
     callback web-config-web-app();
@@ -177,21 +177,33 @@ export global AppState {
        // So maybe better to change how it works in the future ...
         AppBackend.calc-encode-request-display(AppState.control-state == ControlState.EncodeEditing ? FilamentInfoMode.Encode : FilamentInfoMode.View);
     }
-    in-out property <EncodeRequestDisplay> curr-encode-request-display; // updated by rust for formatting needs
+      in-out property <EncodeRequestDisplay> curr-encode-request-display; // updated by rust for formatting needs
 
-    in-out property <int> curr-ams-id: 0;
-    in-out property <[int]> ams-exists: [0];
+      in-out property <int> curr-ams-id: 0;
+      in-out property <[int]> ams-exists: [0];
 
-    in-out property <string> curr-printer: "";
-    in-out property <[string]> available-printers: [];
-    in-out property <string> default-printer: "";
-    in-out property <string> pending-curr-printer: "";
-    changed pending-curr-printer => {
-        if pending-curr-printer != "" {
-            AppBackend.select-printer(pending-curr-printer);
-            pending-curr-printer = "";
+      in-out property <string> curr-printer: "";
+      in-out property <[string]> available-printers: [];
+      in-out property <string> default-printer: "";
+      in-out property <string> pending-curr-printer: "";
+      changed pending-curr-printer => {
+          if pending-curr-printer != "" {
+              AppBackend.select-printer(pending-curr-printer);
+              pending-curr-printer = "";
+          }
+      }
+
+      function delayed-encode-web-app() {
+      self.delayed-encode-web-app-helper = true;
+    }
+    in-out property <bool> delayed-encode-web-app-helper: false;
+    changed delayed-encode-web-app-helper => {
+        if delayed-encode-web-app-helper  {
+            AppBackend.encode-web-app();
+            delayed-encode-web-app-helper = false;
         }
     }
+
 
     in-out property <SpoolScaleState> spool-scale-state: SpoolScaleState.Unknown;
     in-out property <int> spool-scale-weight: 0;
@@ -293,14 +305,9 @@ export global AppState {
         self.user-message = "Tag Found,\nEncoding ...";
         self.user-message-type = StatusType.Normal;
     }
-    // Called from UI in case of UI timeout, can also be called from backend for timeout case
-    public function encoding-timeout() {
-        self.control-state = ControlState.PostAction;
-        self.user-message = "Encoding Tag Timed Out";
-        self.user-message-type = StatusType.Error;
-    }
 
     public function encoding-failed(err-txt: string) {
+        // this is just a termporary failure, not final, can still try placing tag to encode
         self.control-state = ControlState.PostAction;
         self.user-message = "Encoding Tag Failed\n\{err-txt}";
         self.user-message-type = StatusType.Error;
@@ -313,6 +320,7 @@ export global AppState {
         self.user-message = (tray-id == 998) ? "Encoding Succeeded" : (tray-id == 999 ? "Encoding\nStaging Filament\nSucceeded" : tray-id == 254 ? "Encoding\nExternal Slot Filament\nSucceeded" : "Encoding\nAMS \{ams-id + 1}, Slot \{tray-id + 1} Filament\nSucceeded");
         self.user-message-type = StatusType.Success;
         self.stop-highlight-tray();
+        clear-curr-encoding-request();
     }
 
     public function tray-update-failed(ams-id: int, tray-id: int, err-txt: string) {
@@ -399,11 +407,29 @@ export global AppState {
         self.curr-encode-request-display.pa-line2 = "";
     }
 
+    // Called from UI in case of UI timeout, can also be called from backend for timeout case
+    public function encoding-timeout() {
+        self.control-state = ControlState.PostAction;
+        self.user-message = "Encoding Tag Timed Out";
+        self.user-message-type = StatusType.Error;
+
+        // if want to go back to the encode screen use:
+           // self.control-state = ControlState.EncodeEditing;
+           // AppBackend.encode-web-app()
+           // Don't stop-highlight-tray
+        // else
+        clear-curr-encoding-request();
+        AppBackend.read-tag-mode();
+        AppState.stop-highlight-tray();
+        // don't call encode-cancel() becasue on timeout we want to show timeout first on display
+    }
+
     public function encode-cancel() {
         clear-curr-encoding-request();
-        AppBackend.notify-post-encode();
+        AppBackend.clear-encode-scratchpad();
         self.control-state = ControlState.Ready;
         AppBackend.read-tag-mode();
+        AppState.stop-highlight-tray();
     }
 
     public function encode-start() {
@@ -414,8 +440,8 @@ export global AppState {
             user-message = "Place Spool Tag\nto Encode";
             user-message-type = StatusType.Normal;
         }
-        clear-curr-encoding-request();
-        AppBackend.notify-post-encode();
+        // clear-curr-encoding-request();
+        // AppBackend.notify-post-encode();
     }
 
     public function show-spoolscale-dialog(message: string, type: StatusType) {
@@ -450,20 +476,29 @@ export global AppState {
         if AppState.control-state == ControlState.EncodeEditing {
             // if loaded while Encode Editing
             // AppState.encoding-spool-core-visible = true;
-        } else if AppState.control-state == ControlState.Encoding {
+        } else if self.control-state == ControlState.Encoding {
             // if started with simple encoding, and then loaded a spool on the scale
-            // interpret this as forgot to encode also weight
-            clear-curr-encoding-request();
-            AppState.control-state = ControlState.EncodeEditing;
-            // AppState.stop-highlight-tray();
-            // AppState.encoding-spool-core-visible = true;
-            AppBackend.encode-web-app();
+            // interpret this as forgot to encode also weight (whether current weight or new weight)
+            // clear-curr-encoding-request(); we don't want to clear the request but go back to it
+            self.control-state = ControlState.EncodeEditing;
+            // if self.curr-encode-request.encoded-as-new == EncodedAsNew.Yes { // if already selected "Yes" to new, set the weight to new weight
+            //     self.curr-encode-request.weight-new = weight;
+            // }
+            // self.stop-highlight-tray();
+            // self.encoding-spool-core-visible = true;
+            self.delayed-encode-web-app();
         }
     }
 
     public function spool-scale-load-changed(weight: int, stable: bool) {
+        // This is only case of load changed, NOT removed
         self.spool-scale-weight = weight;
         self.spool-scale-weight-stable = stable;
+
+        // if weight gets updated after user stated YES it will update as the weight-new
+        if self.control-state == ControlState.EncodeEditing && self.curr-encode-request.encoded-as-new == EncodedAsNew.Yes && stable { // if already selected "Yes" to new, set the weight to new weight
+            self.curr-encode-request.weight-new = weight;
+        }
     }
 
     public function spool-scale-load-removed() {

@@ -251,8 +251,12 @@ impl ViewModel {
         });
 
         let moved_spool_tag = self.spool_tag_model.clone();
+        let moved_spool_scale = self.spool_scale_model.clone();
         ui_app_backend.on_read_tag_mode(move || {
             moved_spool_tag.borrow().read_tag();
+            if let Err(err) = moved_spool_scale.borrow().read_tag() {
+                error!("Error sending read_tag to scale : {err}");
+            }
         });
 
         let moved_spool_tag = self.spool_tag_model.clone();
@@ -270,13 +274,18 @@ impl ViewModel {
         let moved_spool_tag = self.spool_tag_model.clone();
         let moved_framework = self.framework.clone();
         let moved_app_config = self.app_config.clone();
+        let moved_scale = self.spool_scale_model.clone();
         ui_app_backend.on_encode_web_app(move || {
             moved_app_config.borrow_mut().set_redirect_to_encode();
             let borrowed_framework = moved_framework.borrow();
             let web_config_ip_url = &borrowed_framework.web_config_ip_url;
             let web_config_key = &borrowed_framework.web_config_key;
-            let full_web_config_url = format!("{web_config_ip_url}/encode#sk={web_config_key}");
-            moved_spool_tag.borrow().emulate_tag(&full_web_config_url);
+            let full_web_encode_url = format!("{web_config_ip_url}/encode#sk={web_config_key}");
+            moved_spool_tag.borrow().emulate_tag(&full_web_encode_url);
+            if let Err(err) = moved_scale.borrow().emulate_tag(&full_web_encode_url) {
+                error!("Error sending emulate_tag to scale : {err}");
+            }
+
         });
 
         // Spool Scale
@@ -832,9 +841,10 @@ impl ViewModel {
 
             // In case of encode from blank or staging (which is copied to blank), clean the scratch-pad used
             // If want to allow to return in case of cancel, need to move this to after encode success
-            if tray_id == 998 || tray_id == 999 {
-                moved_view_model.borrow_mut().encode_from_blank = None;
-            }
+            // Note: Moved there 
+            // if tray_id == 998 || tray_id == 999 {
+            //     moved_view_model.borrow_mut().encode_from_blank = None;
+            // }
 
             // Next encode
             let bambu_printer_borrow = moved_bambu_printer.borrow();
@@ -846,7 +856,6 @@ impl ViewModel {
                     Some(&bambu_printer_borrow.printer_uuid_to_encode),
                 )
             };
-            let spool_tag = moved_spool_tag.borrow();
             let set_encoded_as_new = match encode_request.encoded_as_new {
                 crate::app::EncodedAsNew::Yes => Some(true),
                 crate::app::EncodedAsNew::No => Some(false),
@@ -860,11 +869,12 @@ impl ViewModel {
                     set_encoded_as_new,
                 };
                 let cookie = serde_json::to_string(&encode_cookie).unwrap_or_default();
-                spool_tag.write_tag(descriptor, tray_id, cookie);
+                moved_spool_tag.borrow().write_tag(descriptor, tray_id, cookie.clone());
+                let _ = moved_spool_scale.borrow().write_tag(descriptor, tray_id, cookie);
             }
             info!("Sent the write request of tray {}", tray_id);
             // TODO: Get proper timeout fron config and pass it in the write_tag to spool_tag
-            15
+            20 
         });
 
         // // handler for request from UI to reset printer, should work only on selected printer
@@ -946,7 +956,7 @@ impl ViewModel {
             });
 
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
-        self.ui_weak.unwrap().global::<crate::app::AppBackend>().on_notify_post_encode(move || {
+        self.ui_weak.unwrap().global::<crate::app::AppBackend>().on_clear_encode_scratchpad(move || {
             moved_view_model.borrow_mut().encode_from_blank = None;
         });
 
@@ -1537,9 +1547,25 @@ impl SpoolTagObserver for ViewModel {
                 ui.unwrap().global::<crate::app::AppState>().invoke_encode_tag_found();
             }
             Status::WriteSuccess(pure_tray_id, encoded_descriptor, cookie) => {
+
+            // // In case of encode from blank or staging (which is copied to blank), clean the scratch-pad used
+            // // If want to allow to return in case of cancel, need to move this to after encode success
+            // // Note: Moved
+            //     self.encode_from_blank = None;
+
                 let (ams_id, tray_id) = BambuPrinter::get_ams_and_tray_id(*pure_tray_id);
                 let ams_id_for_ui = Self::ams_if_for_ui(ams_id);
                 let tray_id = tray_id as i32;
+
+                // This call is triggered by a call from either spool_tag or spool_scale, so they are already borrowed.
+                // They internally handle the switch from write to read for themselves, but not for the other.
+                // So here we use the try_borrow to check who needs extra notification to stop writing
+                if let Ok(spool_tag_borrow) = self.spool_tag_model.try_borrow() {
+                    spool_tag_borrow.read_tag();
+                }
+                if let Ok(spool_scale_borrow) = self.spool_scale_model.try_borrow() {
+                    let _ = spool_scale_borrow.read_tag();
+                }
 
                 if let (Ok(tag_info), Ok(encode_cookie)) = (
                     TagInformation::from_descriptor(encoded_descriptor),

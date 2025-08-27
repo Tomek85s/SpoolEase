@@ -191,6 +191,8 @@ export component Ready inherits ControlPanelBase {
         AppBackend.clear-staging();
     }
     clicked2() => {
+        AppBackend.clear-encode-scratchpad();
+        AppState.clear-curr-encoding-request();
         AppState.control-state = ControlState.EncodeSelectSource;
         AppBackend.encode-web-app();
     }
@@ -249,15 +251,12 @@ export component Encoding inherits OperationBase {
     button2-timeout: AppState.encode-timeout;
     timeout-clicked2 => {
         AppState.encoding-timeout();
-        AppState.stop-highlight-tray();
     }
     manual-clicked2 => {
-        AppState.control-state = ControlState.Ready;
-        AppState.stop-highlight-tray();
+        AppState.encode-cancel();
     }
     clicked2 => {
-        AppBackend.read-tag-mode();
-        AppState.stop-highlight-tray();
+      // called in both cases - manual and timeout
     }
 }
 

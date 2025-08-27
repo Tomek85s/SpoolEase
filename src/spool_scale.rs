@@ -88,6 +88,39 @@ impl SpoolScale {
         }
     }
 
+    pub fn read_tag(&self) -> Result<(), String> {
+        if let Err(err) = self
+            .console_to_scale
+            .try_send(ConsoleToScale::ReadTag)
+        {
+            Err(format!("Failed sending read_tag to scale {err:?}"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn write_tag(&self, text: &str, tray_id:usize, cookie: String) -> Result<(), String> {
+        if let Err(err) = self
+            .console_to_scale
+            .try_send(ConsoleToScale::WriteTag { text: text.to_string() , tray_id, cookie })
+        {
+            Err(format!("Failed sending request_gcode_analysis to scale {err:?}"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn emulate_tag(&self, url: &str) -> Result<(), String> {
+        if let Err(err) = self
+            .console_to_scale
+            .try_send(ConsoleToScale::EmulateTag { url: url.to_string()})
+        {
+            Err(format!("Failed sending request_gcode_analysis to scale {err:?}"))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn gcode_analysis_notify(&self, gcode_analysis_notification: GcodeAnalysisNotification) -> Result<(), String> {
         if let Err(err) = self
             .console_to_scale
