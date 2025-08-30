@@ -268,7 +268,7 @@ impl Store {
                         weight_new: current_record.weight_new,         // can't change from web
                         weight_current: current_record.weight_current, // can't change from web
                         slicer_filament: spool_record.slicer_filament,
-                        added_time: current_record.added_time,
+                        added_time: current_record.added_time.or(store_safe_time_now()), // in case somehow no added date (ntp) then add it now
                         encode_time: current_record.encode_time,
                         added_full: spool_record.added_full,
                         consumed_since_add: 0.0,
@@ -645,7 +645,9 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
 
                     if !added_new_record {
                         if let Some(current_rec) = spools_db.records.borrow().get(&id) {
-                            spool_rec.added_time = current_rec.data.added_time;
+                            if current_rec.data.added_time.is_some() {
+                                spool_rec.added_time = current_rec.data.added_time;
+                            }
                         }
                     }
 
