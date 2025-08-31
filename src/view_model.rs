@@ -2089,6 +2089,19 @@ impl StoreObserver for ViewModel {
 
 fn get_brand_from_text(text: &str) -> Option<&'static str> {
     let text = text.to_lowercase();
+    // prioritize start with
+    for brand in FILAMENT_BRAND_NAMES.lines() {
+        if brand.contains(',') {
+            if let Some((keyword, brand)) = brand.split_once(',') {
+                if text.starts_with(&keyword.to_lowercase()) {
+                    return Some(brand);
+                }
+            }
+        } else if text.starts_with(&brand.to_lowercase()) {
+            return Some(brand);
+        }
+    }
+    // if not found continue to contains
     for brand in FILAMENT_BRAND_NAMES.lines() {
         if brand.contains(',') {
             if let Some((keyword, brand)) = brand.split_once(',') {

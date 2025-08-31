@@ -29,7 +29,7 @@ use framework_macros::include_bytes_gz;
 use serde::{Deserialize, Serialize};
 use shared::gcode_analysis_task::Fetch3mf;
 
-use crate::app_config::{AppConfig, DefaultPrinterConfig, PrinterConfig, PrintersConfig, ScaleConfig, SPOOLS_CATALOG};
+use crate::app_config::{AppConfig, DefaultPrinterConfig, PrinterConfig, PrintersConfig, ScaleConfig, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
 use crate::store::Store;
 use crate::view_model::ViewModel;
 
@@ -164,6 +164,14 @@ impl AppWithStateBuilder for NestedAppBuilder {
             get_service(picoserve::response::File::with_content_type(
                 "text/plain; charset=utf-8",
                 SPOOLS_CATALOG.as_bytes(),
+            )),
+        );
+
+        let router = router.route(
+            "/filament-brands",
+            get_service(picoserve::response::File::with_content_type(
+                "text/plain; charset=utf-8",
+                FILAMENT_BRAND_NAMES.as_bytes(),
             )),
         );
 
