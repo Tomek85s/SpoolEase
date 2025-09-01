@@ -15,7 +15,7 @@ use crate::{
     bambu_api::{self, AmsMapping2Entry, GcodeState},
 };
 
-const EXTRA_DEBUG: bool = true;
+const EXTRA_DEBUG: bool = false;
 
 macro_rules! debugex {
     ($($t:tt)*) => {
