@@ -310,7 +310,7 @@
         <textarea
           class="csv-text"
           id="spools-text"
-          oninput="handleCSVTextAreaInput(event, 'spools-text', 'spools-chars-left')"
+          oninput="handleCSVTextAreaInput(event, 'spools-text', 'spools-chars-left', 2000)"
           placeholder="- Example (weight is also in the description for display):
 eSUN - Plastic (Clear) - 209g,209
 ProtoPasta 500g - Cardboard - 84g,84"
@@ -380,7 +380,7 @@ ProtoPasta 500g - Cardboard - 84g,84"
         <textarea
           class="csv-text"
           id="custom-filaments-text"
-          oninput="handleCSVTextAreaInput(event, 'custom-filaments-text', 'custom-filaments-chars-left')"
+          oninput="handleCSVTextAreaInput(event, 'custom-filaments-text', 'custom-filaments-chars-left', 4000)"
           placeholder="- Example (normally should be auto generated):
 P714fe8c,ELEGOO PLA Pro,190,240
 Pd7bcff9,FLASHFORGE ASA Basic,240,280
@@ -768,8 +768,8 @@ Pda16356,SUNLU PLA PLA + 2,190,240"
         // Setup IP fields
         setupIPFields(document.querySelectorAll(".ip-part"));
 
-        handleCSVTextAreaInput(null, 'spools-text', 'spools-chars-left');
-        handleCSVTextAreaInput(null, 'custom-filaments-text', 'custom-filaments-chars-left');
+        handleCSVTextAreaInput(null, 'spools-text', 'spools-chars-left', 2000);
+        handleCSVTextAreaInput(null, 'custom-filaments-text', 'custom-filaments-chars-left', 4000);
       });
 
       function getHashParam(key) {
@@ -1206,8 +1206,7 @@ Pda16356,SUNLU PLA PLA + 2,190,240"
       }
 
       // Spools Section
-      function handleCSVTextAreaInput(event, textAreaId, charsLeftId) {
-        let maxChars = 2000;
+      function handleCSVTextAreaInput(event, textAreaId, charsLeftId, maxChars) {
         const csvTextArea = document.getElementById(textAreaId);
         if (csvTextArea.value.length > maxChars) {
           csvTextArea.value = csvTextArea.value.substring(0, maxChars); // Trim excess characters
@@ -1257,7 +1256,7 @@ Pda16356,SUNLU PLA PLA + 2,190,240"
 
         if (data) {
           document.getElementById("spools-text").value = data.spools;
-          handleCSVTextAreaInput(null, 'spools-text', 'spools-chars-left');
+          handleCSVTextAreaInput(null, 'spools-text', 'spools-chars-left', 2000);
         }
       }
 
@@ -1306,7 +1305,7 @@ Pda16356,SUNLU PLA PLA + 2,190,240"
 
         if (data) {
           document.getElementById("custom-filaments-text").value = data.custom_filaments;
-          handleCSVTextAreaInput(null, 'custom-filaments-text', 'custom-filaments-chars-left');
+          handleCSVTextAreaInput(null, 'custom-filaments-text', 'custom-filaments-chars-left', 4000);
         }
       }
 
@@ -1356,7 +1355,7 @@ Pda16356,SUNLU PLA PLA + 2,190,240"
           }
 
           document.getElementById("custom-filaments-text").value = results.join("\n");
-          handleCSVTextAreaInput(event, 'custom-filaments-text', 'custom-filaments-chars-left');
+          handleCSVTextAreaInput(event, 'custom-filaments-text', 'custom-filaments-chars-left', 4000);
       }
 
       function csvEscape(value) {
