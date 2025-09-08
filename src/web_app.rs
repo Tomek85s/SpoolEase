@@ -391,7 +391,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
                                                 extruder: 0,
                                                 diameter: pa.diameter.clone(),
                                                 nozzle_id: "".to_string(),
-                                                setting: pa.name.clone(),
+                                                name: pa.name.clone(),
                                                 k_value: pa.k_value.clone(),
                                             })
                                             .collect::<Vec<_>>(),
@@ -792,7 +792,7 @@ pub struct PressureAdvanceEntry {
     pub extruder: i32,
     pub diameter: String,
     pub nozzle_id: String,
-    pub setting: String,
+    pub name: String,
     pub k_value: String,
 }
 
