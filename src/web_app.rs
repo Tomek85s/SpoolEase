@@ -10,6 +10,7 @@ use embedded_sdmmc::asynchronous::LfnBuffer;
 use framework::framework_web_app::{encrypt, encrypt_bytes, FrameworkState};
 use hashbrown::HashMap;
 use picoserve::response::chunked::{ChunkWriter, ChunkedResponse, ChunksWritten};
+use picoserve::response::{Response, StatusCode};
 use picoserve::routing::{get, get_service};
 use picoserve::{
     extract::{FromRequest, State},
@@ -31,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use shared::gcode_analysis_task::Fetch3mf;
 
 use crate::app_config::{AppConfig, DefaultPrinterConfig, PrinterConfig, PrintersConfig, ScaleConfig, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
+use crate::bambu::KInfo;
 use crate::store::Store;
 use crate::view_model::ViewModel;
 
@@ -406,6 +408,22 @@ impl AppWithStateBuilder for NestedAppBuilder {
             ),
         );
 
+        let router = router.route(
+            "/api/spool-kinfo",
+            post(
+                async move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, get_spool_kinfo: GetSpoolKInfoDTO| {
+                    {
+                        let store = state.0.view_model.borrow_mut().store.clone();
+                        match store.get_spool_ext_by_id(&get_spool_kinfo.id).await {
+                            Ok(spool_rec_ext) => Ok::<String, StatusCode>(GetSpoolKInfoDTOResponse { k_info: spool_rec_ext.k_info }.encrypt(&key.borrow())),
+                            Err(_) => Err::<String, StatusCode>(StatusCode::new(404)),
+                        }
+                    }
+                },
+            ),
+        );
+
+
         // Web App //
 
         let router = router.route(
@@ -777,6 +795,21 @@ pub struct PressureAdvanceEntry {
     pub setting: String,
     pub k_value: String,
 }
+
+//
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct GetSpoolKInfoDTO {
+    id: String,
+}
+encrypted_input!(GetSpoolKInfoDTO);
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct GetSpoolKInfoDTOResponse {
+    pub k_info: Option<KInfo>,
+}
+
+/////////////////////////////////////////////
 
 struct HtmlStringResponse {
     html: String,

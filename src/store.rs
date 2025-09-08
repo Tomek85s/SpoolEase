@@ -57,6 +57,12 @@ pub enum StoreError {
 
     #[snafu(display("Id not found in databse"))]
     IdNotFound,
+
+    #[snafu(display("Extended record format error"))]
+    ExtFileUnread { error: String },
+
+    #[snafu(display("Extended record format error"))]
+    ExtFormat { source: serde_json::error::Error }
 }
 
 #[allow(clippy::enum_variant_names, dead_code)]
@@ -168,9 +174,11 @@ impl Store {
     pub fn notify_tag_stored(&self, result: Result<Option<(&SpoolRecord, &SpoolRecordExt)>, &str>, cookie: Box<dyn AnyClone>) {
         for weak_observer in self.observers.borrow().iter() {
             let observer = weak_observer.upgrade().unwrap();
-            observer
-                .borrow_mut()
-                .on_tag_stored(result.map(|s| s.map(|s| (s.0.clone(), s.1.clone()))).map_err(|e| e.to_string()), cookie.clone()); }
+            observer.borrow_mut().on_tag_stored(
+                result.map(|s| s.map(|s| (s.0.clone(), s.1.clone()))).map_err(|e| e.to_string()),
+                cookie.clone(),
+            );
+        }
     }
 
     pub fn notify_read_spool_record_ext(&self, result: Result<SpoolRecordExt, String>) {
@@ -321,6 +329,19 @@ impl Store {
             }
         }
         None
+    }
+
+    // TODO: once working, use it in other places reading ext
+    pub async fn get_spool_ext_by_id(&self, id: &str) -> Result<SpoolRecordExt, StoreError> {
+        if self.get_spool_by_id(id).is_none() {
+            return Err(StoreError::NotFound { id: id.to_string() });
+        }
+        let spool_rec_ext_file_path = spool_rec_ext_file_path(id).map_err(|_| StoreError::NotFound { id: id.to_string() })?;
+        let file_store = self.framework.borrow().file_store();
+        let mut file_store = file_store.lock().await;
+        let ext_str = file_store.read_file_str(&spool_rec_ext_file_path).await.map_err(|err| StoreError::ExtFileUnread { error: format!("{err} reading '{spool_rec_ext_file_path}'") } )?;
+        let spool_rec_ext = serde_json::from_str::<SpoolRecordExt>(&ext_str).context(ExtFormatSnafu)?;
+        Ok(spool_rec_ext)
     }
 
     pub async fn update_spool(&self, spool_record: SpoolRecord) -> Result<(), StoreError> {
@@ -696,8 +717,6 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                         }
                     }
 
-                    
-
                     // Store of record succeeded and case of new record added, so need to update index and last_spool_id
                     if added_new_record {
                         *store.last_spool_id.borrow_mut() = id.parse().unwrap();
@@ -739,8 +758,6 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                         store.notify_tag_stored(Err(&format!("Internal Error: Trying to store ext with bad id : {id}")), cookie);
                         continue;
                     }
-
-
                 } else {
                     store.notify_tag_stored(Ok(None), cookie.clone());
                     continue;
@@ -774,10 +791,10 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
 }
 
 // TODO: think if to change it to get the spoolRecord from store (and it will hold Rc to store)
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct FullSpoolRecord {
     pub spool_rec: SpoolRecord,
-    pub spool_rec_ext: SpoolRecordExt
+    pub spool_rec_ext: SpoolRecordExt,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -834,7 +851,7 @@ pub struct SpoolRecord {
     // pub used: Option<()>,
 }
 
-#[derive(Debug,Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SpoolRecordExt {
     pub tag: Option<String>,
     pub k_info: Option<KInfo>,
@@ -842,7 +859,17 @@ pub struct SpoolRecordExt {
 
 impl SpoolRecordExt {
     pub fn get_calibrations(&self, printer: &str, extruder: i32, diameter: &str, nozzle_id: &str) -> Option<&KNozzleId> {
-        let res = self.k_info.as_ref()?.printers.get(printer)?.extruders.get(&extruder)?.diameters.get(diameter)?.nozzles.get(nozzle_id);
+        let res = self
+            .k_info
+            .as_ref()?
+            .printers
+            .get(printer)?
+            .extruders
+            .get(&extruder)?
+            .diameters
+            .get(diameter)?
+            .nozzles
+            .get(nozzle_id);
         res
     }
 }
