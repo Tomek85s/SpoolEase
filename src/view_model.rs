@@ -1290,7 +1290,6 @@ impl ViewModel {
         // and that's taking place when it's already borrowed and another borrow will panic
 
         let ui = self.ui_weak.unwrap();
-
         // ----- handle number of ams's and curr_ams -----
         if let Some(mut ams_exist_bits) = bambu_printer.ams_exist_bits {
             let mut ams_exist_vec = Vec::<i32>::new();
@@ -2378,6 +2377,7 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
     for printer_index in 0..num_of_printers {
         let printer = view_model.borrow().bambu_printer_model.printers[printer_index].clone();
         BambuPrinter::load_printer_state(&framework, &printer, &store).await;
+        view_model.borrow().update_ui_from_printer(&printer.borrow());
     }
 
     let mut printer_index = 0;

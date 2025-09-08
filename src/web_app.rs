@@ -384,16 +384,13 @@ impl AppWithStateBuilder for NestedAppBuilder {
                                             .borrow()
                                             .calibrations
                                             .iter()
-                                            .flat_map(|(d, cals)| {
-                                                cals.iter()
-                                                    .filter(|cal| cal.1.filament_id == get_printers_filament_pa.slicer_filament_code)
-                                                    .map(|pa| PressureAdvanceEntry {
-                                                        extruder: 0,
-                                                        diameter: d.clone(),
-                                                        nozzle_id: "".to_string(),
-                                                        setting: pa.1.name.clone(),
-                                                        k_value: pa.1.k_value.clone(),
-                                                    })
+                                            .filter(|cal| cal.filament_id == get_printers_filament_pa.slicer_filament_code)
+                                            .map(|pa| PressureAdvanceEntry {
+                                                extruder: 0,
+                                                diameter: pa.diameter.clone(),
+                                                nozzle_id: "".to_string(),
+                                                setting: pa.name.clone(),
+                                                k_value: pa.k_value.clone(),
                                             })
                                             .collect::<Vec<_>>(),
                                     },

@@ -60,6 +60,8 @@ pub struct TrayBits {
     pub tray_reading_bits: Option<u32>,
 }
 
+type WritePacketsChannel = embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 20>;
+type ReadPacketsPubSub = PubSubChannel<NoopRawMutex, BufferedMqttPacket, 20, 2, 1>;
 pub struct BambuPrinter {
     pub bambu_model: Option<Rc<RefCell<Self>>>,
     pub log_filter: log::LevelFilter,
@@ -83,8 +85,8 @@ pub struct BambuPrinter {
     inner_virt_tray: Tray,
     ams_trays_dirty: [bool; 24],
     virty_tray_dirty: bool,
-    pub calibrations: HashMap<String, HashMap<i32, Calibration>>,
-    write_packets: Rc<embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 3>>,
+    pub calibrations: Vec<Calibration>,
+    write_packets: Rc<WritePacketsChannel>,
     #[allow(dead_code)]
     restart_printer: Rc<embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::NoopRawMutex, i32>>,
     observers: Vec<alloc::rc::Weak<RefCell<dyn BambuPrinterObserver>>>,
@@ -333,7 +335,7 @@ impl BambuPrinter {
         auto_restore_k: bool,
         track_print_consume: bool,
         fetch_3mf: Fetch3mf,
-        write_packets: Rc<embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 3>>,
+        write_packets: Rc<WritePacketsChannel>,
         app_config: Rc<RefCell<AppConfig>>,
         restart_printer: Rc<embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::NoopRawMutex, i32>>,
         log_filter: log::LevelFilter,
@@ -368,7 +370,7 @@ impl BambuPrinter {
         auto_restore_k: bool,
         track_print_consume: bool,
         fetch_3mf: Fetch3mf,
-        write_packets: Rc<embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 3>>,
+        write_packets: Rc<WritePacketsChannel>,
         app_config: Rc<RefCell<AppConfig>>,
         restart_printer: Rc<embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::NoopRawMutex, i32>>,
         log_filter: log::LevelFilter,
@@ -442,7 +444,7 @@ impl BambuPrinter {
             inner_virt_tray: unknown,
             ams_trays_dirty: [false; 24],
             virty_tray_dirty: false,
-            calibrations: HashMap::new(),
+            calibrations: Vec::new(),
             write_packets,
             observers: Vec::new(),
             app_config,
@@ -536,9 +538,10 @@ impl BambuPrinter {
     }
 
     fn get_calibration(&self, nozzle_diameter: &str, cali_idx: i32) -> Option<&Calibration> {
-        let nozzle_calibrations = self.calibrations.get(nozzle_diameter)?;
-        let calibration = nozzle_calibrations.get(&cali_idx)?;
-        Some(calibration)
+        // let nozzle_calibrations = self.calibrations.get(nozzle_diameter)?;
+        // let calibration = nozzle_calibrations.get(&cali_idx)?;
+        self.calibrations.iter().find(|cal| cal.diameter == nozzle_diameter && cal.cali_idx == cali_idx)
+        // Some(calibration)
     }
 
     fn get_cali_k_value(&self, nozzle_diameter: &str, cali_idx: i32) -> Option<String> {
@@ -702,6 +705,14 @@ impl BambuPrinter {
                     }
                     Some(new_tray)
                 } else {
+                    // TODO: This is wrong! The correct thing to do is to upadte the information from the printer
+                    //       and not just assume that nothing changed, an external command could change the color
+                    //       it's currently being handled by monitoring those commands and dealing with them as well
+                    //       but not sure they are sent when modified via printer console
+                    //       Also - IF outside DEV mode push_all is not accepted, this will be important to speed up 
+                    //       showing AMS colors at least, because at least on P1S it can be very long time until 
+                    //       printer sends a message that contains the ams_exist_bits and tray_exist_bits
+
                     // In case the tray is empty (so no ready bits), we still want to keep the filamen-info of the tray, but set it as empty
                     // special case handling (different than Bambustudio).
                     // we remember historical color, K, etc (which the printer also remembers, just doesn't report)
@@ -957,27 +968,28 @@ impl BambuPrinter {
     #[allow(non_snake_case)]
     pub fn process_print_message__extrusion_cali_get(&mut self, print: &bambu_api::PrintData) -> bool {
         let mut change_made = false;
-        let nozzle_diameter = match &print.nozzle_diameter {
-            Some(nozzle_diameter) => nozzle_diameter,
-            None => return false,
-        };
-        // filament_id either empty string (so entire list) or something
-        let filament_id = match &print.filament_id {
-            Some(filament_id) => filament_id,
-            None => return false,
-        };
+        // let nozzle_diameter = match &print.nozzle_diameter {
+        //     Some(nozzle_diameter) => nozzle_diameter,
+        //     None => return false,
+        // };
 
-        if let Some(ref filaments) = print.filaments {
-            change_made = true;
-            let nozzle_calibrations = self.calibrations.entry_ref(nozzle_diameter).or_default(); //insert(HashMap::new()) let calibration = Calibration::from(filament);
-            if filament_id.is_empty() {
-                nozzle_calibrations.clear();
-            } else {
-                nozzle_calibrations.retain(|_k, v| &v.filament_id != filament_id);
-            }
-            for filament in filaments {
-                let calibration = Calibration::from(filament);
-                nozzle_calibrations.insert(filament.cali_idx, calibration);
+        // // filament_id either empty string (so entire list) or something
+        // let filament_id = match &print.filament_id {
+        //     Some(filament_id) => filament_id,
+        //     None => return false,
+        // };
+
+        // ignore if filament_id isn't ""
+        if let Some(nozzle_diameter) = &print.nozzle_diameter {
+            if print.filament_id.as_deref() == Some("") {
+                if let Some(ref filaments) = print.filaments { // filaments is really calibrations
+                    change_made = true;
+                    self.calibrations.retain(|cal| &cal.diameter != nozzle_diameter);
+                    for filament in filaments {
+                        let calibration = Calibration::from(filament, nozzle_diameter);
+                        self.calibrations.push(calibration);
+                    }
+                }
             }
         }
 
@@ -1169,6 +1181,7 @@ impl BambuPrinter {
 
         let mut removed_tags: HashMap<usize, TagInformation> = HashMap::new();
 
+        let mut _derived_ams_exist_bits = 0;
         for tray_id in 0..self.ams_trays().len() {
             let spool_removed = if let (Some(prev_tray_exist_bits), Some(new_tray_exist_bits)) = (&prev_tray_exist_bits, &self.tray_exist_bits) {
                 (((prev_tray_exist_bits >> tray_id) & 0x01) != 0) && (((new_tray_exist_bits >> tray_id) & 0x01) == 0)
@@ -1180,6 +1193,7 @@ impl BambuPrinter {
             let source_tray = if let Some(amss) = &ams.ams {
                 let ams = amss.iter().find(|v| v.id == ams_id_str);
                 if let Some(ams_data) = ams {
+                    _derived_ams_exist_bits |= 1 << ams_id;
                     ams_data.tray.iter().find(|v| v.id == Some(ams_tray_id as u32))
                 } else {
                     None
@@ -1203,6 +1217,7 @@ impl BambuPrinter {
                 }
             }
 
+
             // This is taken care of insidte get_updated_tray, but leaving here for now, just in case
             // debug!(">>>>> Checking tray {tray_id} ready state;")
             // if self.ams_trays()[tray_id].state == TrayState::Ready {
@@ -1213,6 +1228,11 @@ impl BambuPrinter {
             //     }
             // }
         }
+
+        // Optional for the future if we want to speed up initialization w/o push_all
+        // if self.ams_exist_bits.is_none() {
+        //     self.ams_exist_bits = Some(_derived_ams_exist_bits);
+        // }
         (change_made, removed_tags, tray_xxx_change_made)
     }
 
@@ -1307,7 +1327,7 @@ impl BambuPrinter {
         printer_serial: &String,
         printer_number: usize,
         log_filter: log::LevelFilter,
-        write_packets: Rc<embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 3>>,
+        write_packets: Rc<WritePacketsChannel>,
         payload: String,
     ) {
         if log_filter >= log::Level::Debug {
@@ -1332,7 +1352,7 @@ impl BambuPrinter {
         printer_serial: &String,
         printer_number: usize,
         log_filter: log::LevelFilter,
-        write_packets: Rc<embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 3>>,
+        write_packets: Rc<WritePacketsChannel>,
     ) {
         let cmd = crate::bambu_api::GetVersionCommand::new();
         let payload = serde_json::to_string_pretty(&cmd).unwrap();
@@ -1349,7 +1369,7 @@ impl BambuPrinter {
         printer_serial: &String,
         printer_number: usize,
         log_filter: log::LevelFilter,
-        write_packets: Rc<embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 3>>,
+        write_packets: Rc<WritePacketsChannel>,
     ) {
         let cmd = crate::bambu_api::PushAllCommand::new();
         let payload = serde_json::to_string_pretty(&cmd).unwrap();
@@ -1366,7 +1386,7 @@ impl BambuPrinter {
         printer_serial: &String,
         printer_number: usize,
         log_filter: log::LevelFilter,
-        write_packets: Rc<embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 3>>,
+        write_packets: Rc<WritePacketsChannel>,
         nozzle_diameter: &str,
     ) {
         let cmd = crate::bambu_api::ExtrusionCaliGetCommand::new(nozzle_diameter);
@@ -1551,7 +1571,7 @@ impl BambuPrinter {
         let printer_nozzle = self.nozzle_diameter().as_ref()?;
 
         // TODO: for H2D, need to add extruder, which would need to be decided by an extra param to receive which is the slot (which defines also the extruder indirectly thgouth AMS)
-        let printer_calibrations = self.calibrations.get(printer_nozzle)?;
+        let printer_calibrations = self.calibrations.iter().filter(|cal| cal.diameter == *printer_nozzle);
 
         let filament_id = &full_spool_rec.as_ref()?.spool_rec.slicer_filament;
         // Using the new K from SpoolRecordExt
@@ -1572,33 +1592,33 @@ impl BambuPrinter {
             // Important Note: On A1,P1,X1 - calibration includes setting_id, so if we have it we encode it and then when scanning will compare it.
             //                 On H2D - Setting_id is not included - therefore the second part of below filter will compare None (on calibration) to filament setting_id
             //                 This is ok, because if there is no match it means it is not exact match from this printer type, it was encoded on pritner with setting_id and loaded to h2d
-            let same_filament_id_nozzle_printer_type_calibrations = printer_calibrations.iter().filter(|&c| c.1.filament_id == *filament_id);
+            let same_filament_id_nozzle_printer_type_calibrations = printer_calibrations.filter(|&c| c.filament_id == *filament_id);
             // A1
             if let Some(calibration_match) = same_filament_id_nozzle_printer_type_calibrations
                 .clone()
-                .find(|printer_calibration| printer_calibration.1.name == nozzle_k.name)
+                .find(|printer_calibration| printer_calibration.name == nozzle_k.name)
             {
-                return Some(calibration_match.1.clone());
+                return Some(calibration_match.clone());
             // Starting here, we can improve by finding several that match and select the closest
             // A2
             } else if let Some(calibration_match) = same_filament_id_nozzle_printer_type_calibrations
                 .clone()
-                .find(|printer_calibration| clean_compare(&printer_calibration.1.name, &nozzle_k.name))
+                .find(|printer_calibration| clean_compare(&printer_calibration.name, &nozzle_k.name))
             {
-                return Some(calibration_match.1.clone());
+                return Some(calibration_match.clone());
             // A3
             } else if let Some(calibration_match) = same_filament_id_nozzle_printer_type_calibrations
                 .clone()
-                .find(|printer_calibration| printer_calibration.1.k_value == nozzle_k.k_value)
+                .find(|printer_calibration| printer_calibration.k_value == nozzle_k.k_value)
             // because we are on same printer-type/nozzle this should be ok
             {
-                return Some(calibration_match.1.clone());
+                return Some(calibration_match.clone());
             // A4 : TODO: use metaphone double to compare strings
             } else if let Some(calibration_match) = same_filament_id_nozzle_printer_type_calibrations
                 .clone()
-                .find(|printer_calibration| similar_compare(&printer_calibration.1.name, &nozzle_k.name))
+                .find(|printer_calibration| similar_compare(&printer_calibration.name, &nozzle_k.name))
             {
-                return Some(calibration_match.1.clone());
+                return Some(calibration_match.clone());
             }
         }
 
@@ -1703,11 +1723,9 @@ impl BambuPrinter {
         // Now take the calibration of current nozzle from the tray as well
         // This is not encoded to the tag, but rather saved to store, but returned from here as part of the tag
         if let (Some(curr_nozzle_diameter), Some(tray_cali_idx)) = (&self.nozzle_diameter(), tray.cali_idx) {
-            if let Some(nozzle_calibrations) = self.calibrations.get(curr_nozzle_diameter) {
-                if let Some(calibration) = &nozzle_calibrations.get(&tray_cali_idx) {
-                    tag_info.calibrations.insert(curr_nozzle_diameter.clone(), (*calibration).clone());
+                if let Some(calibration) = self.calibrations.iter().find(|cal| cal.cali_idx == tray_cali_idx){
+                    tag_info.calibrations.insert(curr_nozzle_diameter.clone(), calibration.into());
                 }
-            }
         }
 
         Ok(tag_info)
@@ -1959,12 +1977,50 @@ impl From<&bambu_api::PrintTray> for FilamentInfo {
 #[allow(dead_code)]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Calibration {
+    pub diameter: String,
     pub filament_id: String,
     pub k_value: String,
     // n_coef: f32,
     pub setting_id: Option<String>,
     pub name: String,
     pub cali_idx: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct OldTagCalibration {
+    pub filament_id: String,
+    pub k_value: String,
+    // n_coef: f32,
+    pub setting_id: Option<String>,
+    pub name: String,
+    pub cali_idx: i32,
+}
+
+impl OldTagCalibration {
+    pub fn new_minimal(k_value: &str, filament_id: &str, setting_id: &str, name: &str, cali_idx: i32) -> Self {
+        Self {
+            k_value: formatted_k_value(k_value),
+            filament_id: String::from(filament_id),
+            setting_id: if setting_id.is_empty() { None } else { Some(setting_id.to_string()) },
+            name: String::from(name),
+            cali_idx,
+        }
+    }
+}
+
+
+impl From<&Calibration> for OldTagCalibration {
+    fn from(v: &Calibration) -> Self {
+        // this "Filament" in bambu_api is really calibrations, bambulab naming ...
+        Self {
+            filament_id: v.filament_id.clone(),
+            name: v.name.clone(),
+            k_value: v.k_value.clone(),
+            // n_coef: f32::from_str(&v.n_coef).unwrap_or(-1.0),
+            setting_id: v.setting_id.clone(),
+            cali_idx: v.cali_idx,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1995,10 +2051,25 @@ fn formatted_k_value(k: &str) -> String {
     formatted_k_value
 }
 
-impl From<&bambu_api::Filament> for Calibration {
-    fn from(v: &bambu_api::Filament) -> Self {
+// impl From<&bambu_api::Filament> for Calibration {
+//     fn from(v: &bambu_api::Filament) -> Self {
+//         // this "Filament" in bambu_api is really calibrations, bambulab naming ...
+//         Self {
+//             filament_id: v.filament_id.clone(),
+//             name: v.name.clone(),
+//             k_value: formatted_k_value(&v.k_value),
+//             // n_coef: f32::from_str(&v.n_coef).unwrap_or(-1.0),
+//             setting_id: v.setting_id.clone(),
+//             cali_idx: v.cali_idx,
+//         }
+//     }
+// }
+
+impl Calibration {
+    pub fn from(v: &bambu_api::Filament, diameter: &str) -> Self {
         // this "Filament" in bambu_api is really calibrations, bambulab naming ...
         Self {
+            diameter: diameter.to_string(),
             filament_id: v.filament_id.clone(),
             name: v.name.clone(),
             k_value: formatted_k_value(&v.k_value),
@@ -2007,11 +2078,10 @@ impl From<&bambu_api::Filament> for Calibration {
             cali_idx: v.cali_idx,
         }
     }
-}
 
-impl Calibration {
-    pub fn new_minimal(k_value: &str, filament_id: &str, setting_id: &str, name: &str, cali_idx: i32) -> Self {
+    pub fn new_minimal(diameter: &str, k_value: &str, filament_id: &str, setting_id: &str, name: &str, cali_idx: i32) -> Self {
         Self {
+            diameter: diameter.to_string(),
             k_value: formatted_k_value(k_value),
             filament_id: String::from(filament_id),
             setting_id: if setting_id.is_empty() { None } else { Some(setting_id.to_string()) },
@@ -2056,19 +2126,9 @@ pub fn init(
     let fetch_3mf = printer_config.fetch_3mf;
 
     // == Setup MQTT ==================================================================
-    let write_packets = Rc::new(embassy_sync::channel::Channel::<
-        embassy_sync::blocking_mutex::raw::NoopRawMutex,
-        crate::my_mqtt::BufferedMqttPacket,
-        3,
-    >::new());
+    let write_packets = Rc::new(WritePacketsChannel::new());
 
-    let read_packets = Rc::new(embassy_sync::pubsub::PubSubChannel::<
-        embassy_sync::blocking_mutex::raw::NoopRawMutex,
-        crate::my_mqtt::BufferedMqttPacket,
-        20,
-        2,
-        1,
-    >::new());
+    let read_packets = Rc::new(ReadPacketsPubSub::new());
 
     let restart_printer = Rc::new(embassy_sync::signal::Signal::<embassy_sync::blocking_mutex::raw::NoopRawMutex, i32>::new());
 
@@ -2121,9 +2181,6 @@ pub async fn fetch_initial_info(bambu_printer: Rc<RefCell<BambuPrinter>>) {
     let log_filter = bambu_printer.borrow().log_filter;
 
     BambuPrinter::request_version_info_async(&printer_serial, printer_number, log_filter, write_packets.clone()).await;
-    while bambu_printer.borrow().nozzle_diameter().is_none() {
-        Timer::after_millis(100).await;
-    }
 
     // fetch first setting for all nozzles, need that in advance before getting filaments
     let nozzle_diameters = ["0.2", "0.6", "0.8", "0.4"];
@@ -2162,7 +2219,7 @@ fn clean_bytes_to_string(input: &[u8]) -> String {
 
 #[embassy_executor::task(pool_size = MAX_NUM_PRINTERS)]
 pub async fn incoming_messages_task(
-    read_packets: Rc<PubSubChannel<NoopRawMutex, BufferedMqttPacket, 20, 2, 1>>,
+    read_packets: Rc<ReadPacketsPubSub>,
     bambu_printer: Rc<RefCell<BambuPrinter>>,
 ) {
     let mut subscriber = read_packets.subscriber().unwrap();
@@ -2282,8 +2339,8 @@ pub async fn restartable_mqtt_task(
     framework: Rc<RefCell<Framework>>,
     rx_socket_buffer_size: usize,
     tx_socket_buffer_size: usize,
-    read_packets: Rc<PubSubChannel<NoopRawMutex, BufferedMqttPacket, 20, 2, 1>>,
-    write_packets: Rc<Channel<NoopRawMutex, BufferedMqttPacket, 3>>,
+    read_packets: Rc<ReadPacketsPubSub>,
+    write_packets: Rc<WritePacketsChannel>,
     bambu_printer: Rc<RefCell<BambuPrinter>>,
     restart_printer: Rc<embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::NoopRawMutex, i32>>,
     ssdp_pub_sub: &'static SSDPPubSubChannel,
@@ -2320,8 +2377,8 @@ pub async fn bambu_mqtt_task(
     bambu_printer: Rc<RefCell<BambuPrinter>>,
     rx_socket_buffer_size: usize,
     tx_socket_buffer_size: usize,
-    read_packets: Rc<PubSubChannel<NoopRawMutex, BufferedMqttPacket, 20, 2, 1>>,
-    write_packets: Rc<Channel<NoopRawMutex, BufferedMqttPacket, 3>>,
+    read_packets: Rc<ReadPacketsPubSub>,
+    write_packets: Rc<WritePacketsChannel>,
     ssdp_pub_sub: &'static SSDPPubSubChannel,
 ) {
     let stack = framework.borrow().stack;
@@ -2420,7 +2477,7 @@ pub struct TagInformation {
     pub note: Option<String>,
     pub encode_time: Option<i32>,
     // for old tags support (where K was on tag)
-    pub calibrations: HashMap<String, Calibration>,
+    pub calibrations: HashMap<String, OldTagCalibration>,
     pub calibrations_printer_name: String, // has value only if calibrations has any value
     pub calibrations_printer_uuid: String, // has value only if calibrations has any value
 }
@@ -2751,7 +2808,7 @@ impl TagInformation {
                         let setting_id = k_parts.next().ok_or(Error::ParseError)?;
                         let name = k_parts.next().ok_or(Error::ParseError)?;
                         let name = my_decode_from_url_part(name);
-                        let calibration = Calibration::new_minimal(k_value, &filament_info_result.tray_info_idx, setting_id, &name, -1);
+                        let calibration = OldTagCalibration::new_minimal(k_value, &filament_info_result.tray_info_idx, setting_id, &name, -1);
                         calibrations_result.insert(nozzle_diameter, calibration);
                     }
                     _ => (), // previous run already identified unrecognized parameters, here we skip also those that were ok so can't error
