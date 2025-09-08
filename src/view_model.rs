@@ -61,7 +61,7 @@ pub struct ViewModel {
     // Application
     #[allow(dead_code)]
     app_config: Rc<RefCell<AppConfig>>,
-    bambu_printer_model: SelectedPrinter,
+    pub bambu_printer_model: SelectedPrinter,
     spool_tag_model: Rc<RefCell<spool_tag::SpoolTag>>,
     spool_scale_model: Rc<RefCell<spool_scale::SpoolScale>>,
     filament_staging: Rc<RefCell<FilamentStaging>>,
@@ -2062,8 +2062,8 @@ impl TerminalObserver for TerminalViewModel {
     }
 }
 
-struct SelectedPrinter {
-    printers: Vec<Rc<RefCell<BambuPrinter>>>,
+pub struct SelectedPrinter {
+    pub printers: Vec<Rc<RefCell<BambuPrinter>>>,
     index: usize,
 }
 

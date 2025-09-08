@@ -8,6 +8,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use embedded_sdmmc::asynchronous::LfnBuffer;
 use framework::framework_web_app::{encrypt, encrypt_bytes, FrameworkState};
+use hashbrown::HashMap;
 use picoserve::response::chunked::{ChunkWriter, ChunkedResponse, ChunksWritten};
 use picoserve::routing::{get, get_service};
 use picoserve::{
@@ -362,6 +363,52 @@ impl AppWithStateBuilder for NestedAppBuilder {
             ),
         );
 
+        let router = router.route(
+            "/api/printers-filament-pa",
+            post(
+                move |State(Encryption(key)): State<Encryption>,
+                      state: State<ConsoleAppState>,
+                      get_printers_filament_pa: GetPrintersFilamentPaDTO| {
+                    ready({
+                        let view_model_borrow = state.0.view_model.borrow_mut();
+                        let printers = &view_model_borrow.bambu_printer_model.printers;
+                        let printers_filament_pa = printers
+                            .iter()
+                            .map(|printer| {
+                                (
+                                    printer.borrow().printer_serial.clone(),
+                                    PrinterEntry {
+                                        name: printer.borrow().printer_name.clone(),
+                                        extruders: 1,
+                                        pressure_advance: printer
+                                            .borrow()
+                                            .calibrations
+                                            .iter()
+                                            .flat_map(|(d, cals)| {
+                                                cals.iter()
+                                                    .filter(|cal| cal.1.filament_id == get_printers_filament_pa.slicer_filament_code)
+                                                    .map(|pa| PressureAdvanceEntry {
+                                                        extruder: 0,
+                                                        diameter: d.clone(),
+                                                        nozzle_id: "".to_string(),
+                                                        setting: pa.1.name.clone(),
+                                                        k_value: pa.1.k_value.clone(),
+                                                    })
+                                            })
+                                            .collect::<Vec<_>>(),
+                                    },
+                                )
+                            })
+                            .collect::<HashMap<_, _>>();
+                        GetPrintersFilamentPaDTOResponse {
+                            printers: printers_filament_pa,
+                        }
+                        .encrypt(&key.borrow())
+                    })
+                },
+            ),
+        );
+
         // Web App //
 
         let router = router.route(
@@ -564,7 +611,11 @@ impl From<PrinterConfigDTO> for PrinterConfig {
             log_filter: v.log_filter,
             auto_restore_k: v.auto_restore_k,
             track_print_consume: v.track_print_consume,
-            fetch_3mf: if v.fetch_3mf.as_deref().unwrap_or("") == "printer-ftp" { Fetch3mf::PrinterFtp } else { Fetch3mf::CloudHttp },
+            fetch_3mf: if v.fetch_3mf.as_deref().unwrap_or("") == "printer-ftp" {
+                Fetch3mf::PrinterFtp
+            } else {
+                Fetch3mf::CloudHttp
+            },
         }
     }
 }
@@ -581,7 +632,7 @@ impl From<&PrinterConfig> for PrinterConfigDTO {
             fetch_3mf: match v.fetch_3mf {
                 Fetch3mf::PrinterFtp => Some("printer-ftp".to_string()),
                 Fetch3mf::CloudHttp => Some("cloud-http".to_string()),
-            }
+            },
         }
     }
 }
@@ -701,6 +752,33 @@ encrypted_input!(AddSpoolDTO);
 pub struct AddSpoolDTOResponse {
     pub id: String,
     pub csv: String,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct GetPrintersFilamentPaDTO {
+    slicer_filament_code: String,
+}
+encrypted_input!(GetPrintersFilamentPaDTO);
+
+#[derive(serde::Deserialize, serde::Serialize, Default)]
+pub struct GetPrintersFilamentPaDTOResponse {
+    pub printers: HashMap<String, PrinterEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PrinterEntry {
+    pub name: String,
+    pub extruders: u32,
+    pub pressure_advance: Vec<PressureAdvanceEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PressureAdvanceEntry {
+    pub extruder: i32,
+    pub diameter: String,
+    pub nozzle_id: String,
+    pub setting: String,
+    pub k_value: String,
 }
 
 struct HtmlStringResponse {
