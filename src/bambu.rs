@@ -30,9 +30,7 @@ use embassy_sync::{
     blocking_mutex::{
         raw::{CriticalSectionRawMutex, NoopRawMutex},
         Mutex,
-    },
-    channel::Channel,
-    pubsub::PubSubChannel,
+    }, channel::Channel, pubsub::PubSubChannel
 };
 use embassy_time::{with_timeout, Duration, Timer};
 use hashbrown::HashMap;
@@ -60,7 +58,7 @@ pub struct TrayBits {
     pub tray_reading_bits: Option<u32>,
 }
 
-type WritePacketsChannel = embassy_sync::channel::Channel<embassy_sync::blocking_mutex::raw::NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 20>;
+type WritePacketsChannel = Channel<NoopRawMutex, crate::my_mqtt::BufferedMqttPacket, 20>;
 type ReadPacketsPubSub = PubSubChannel<NoopRawMutex, BufferedMqttPacket, 20, 2, 1>;
 pub struct BambuPrinter {
     pub bambu_model: Option<Rc<RefCell<Self>>>,
@@ -81,20 +79,24 @@ pub struct BambuPrinter {
     pub printer_connectivity_ok: Option<bool>,
     inner_nozzle_diameter: Option<String>,
     nozzle_diameter_dirty: bool,
-    inner_ams_trays: [Tray; 24], // 16 in standard AMS, 8 in HT (H2D)
+    inner_ams_trays: Vec<Tray>, // [Tray; 24], // 16 in standard AMS, 8 in HT (H2D)
     inner_virt_tray: Tray,
     ams_trays_dirty: [bool; 24],
     virty_tray_dirty: bool,
+    tray_exist_bits_dirty: bool,
+    tray_read_done_bits_dirty: bool,
+    ams_exist_bits_dirty: bool,
+    calibrations_dirty: bool,
     pub calibrations: Vec<Calibration>,
     write_packets: Rc<WritePacketsChannel>,
     #[allow(dead_code)]
     restart_printer: Rc<embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::NoopRawMutex, i32>>,
     observers: Vec<alloc::rc::Weak<RefCell<dyn BambuPrinterObserver>>>,
     app_config: Rc<RefCell<AppConfig>>,
-    tray_exist_bits: Option<u32>,
-    tray_read_done_bits: Option<u32>,
+    inner_tray_exist_bits: Option<u32>,
+    inner_tray_read_done_bits: Option<u32>,
     tray_reading_bits: Option<u32>,
-    pub ams_exist_bits: Option<u32>,
+    pub inner_ams_exist_bits: Option<u32>,
     printer_was_disconnected: bool,
     pending_k_restore_sequence: bool,
     pub curr_print_project: Option<PrintProject>,
@@ -120,7 +122,7 @@ pub trait BambuPrinterObserver {
 
 // Special access to trays fields for dirty tracking
 impl BambuPrinter {
-    pub fn ams_trays(&self) -> &[Tray; 24] {
+    pub fn ams_trays(&self) -> &Vec<Tray> {
         &self.inner_ams_trays
     }
     pub fn swap_ams_tray<'a>(&mut self, index: usize, tray: &'a mut Tray) -> &'a mut Tray {
@@ -205,16 +207,44 @@ impl BambuPrinter {
         }
     }
 
-    pub fn init_printer_persistent_state(&mut self, mut state: PrinterPersistentState, store: &Rc<Store>) {
-        let n_trays = core::cmp::min(self.inner_ams_trays.len(), state.ams_trays.len());
-        for i in 0..n_trays {
-            self.inner_ams_trays[i] = state.ams_trays.remove(0);
+    pub fn ams_exist_bits(&self) -> &Option<u32> {
+        &self.inner_ams_exist_bits
+    }
+    pub fn set_ams_exist_bits(&mut self, new_ams_exist_bits: Option<u32>) {
+        if new_ams_exist_bits != self.inner_ams_exist_bits {
+            self.inner_ams_exist_bits = new_ams_exist_bits;
+            self.ams_exist_bits_dirty = true;
         }
-        self.inner_virt_tray = state.virt_tray.into_owned();
+    }
+
+    pub fn tray_exist_bits(&self) -> &Option<u32> {
+        &self.inner_tray_exist_bits
+    }
+    pub fn set_tray_exist_bits(&mut self, new_tray_exist_bits: Option<u32>) {
+        if new_tray_exist_bits != self.inner_tray_exist_bits {
+            self.inner_tray_exist_bits = new_tray_exist_bits;
+            self.tray_exist_bits_dirty = true;
+        }
+    }
+
+    pub fn tray_read_done_bits(&self) -> &Option<u32> {
+        &self.inner_tray_read_done_bits
+    }
+    pub fn set_tray_read_done_bits(&mut self, new_tray_read_done_bits: Option<u32>) {
+        if new_tray_read_done_bits != self.inner_tray_read_done_bits {
+            self.inner_tray_read_done_bits = new_tray_read_done_bits;
+            self.tray_read_done_bits_dirty = true;
+        }
+    }
+
+    pub fn init_printer_persistent_state(&mut self, mut state: PrinterPersistentState, store: &Rc<Store>) {
+        self.inner_ams_trays = core::mem::take(state.ams_trays.to_mut());
+        self.inner_virt_tray = core::mem::take(state.virt_tray.to_mut());
         self.inner_nozzle_diameter = state.nozzle_diameter;
-        self.ams_exist_bits = state.ams_exist_bits;
-        self.tray_exist_bits = state.tray_exist_bits;
-        self.tray_read_done_bits = state.tray_read_done_bits;
+        self.inner_ams_exist_bits = state.ams_exist_bits;
+        self.inner_tray_exist_bits = state.tray_exist_bits;
+        self.inner_tray_read_done_bits = state.tray_read_done_bits;
+        self.calibrations = core::mem::take(state.calibrations.to_mut());
 
         // This section can be potentially removed in the future since state consume_since_weight should be available and updated
         // This is only for transition time where the there was no consumed_since_weight in the metainfo for correct display calculation
@@ -270,19 +300,21 @@ impl BambuPrinter {
             }
             let ams_trays_dirty = printer_borrow.ams_trays_dirty.iter().any(|&v| v);
 
-            if ams_trays_dirty || printer_borrow.virty_tray_dirty || printer_borrow.nozzle_diameter_dirty {
+            if ams_trays_dirty || printer_borrow.virty_tray_dirty || printer_borrow.nozzle_diameter_dirty || printer_borrow.ams_exist_bits_dirty || printer_borrow.tray_exist_bits_dirty || printer_borrow.tray_read_done_bits_dirty || printer_borrow.calibrations_dirty {
                 debug!(
-                    "[{}] Dirty status: AMS slots({}), Ext slot({}), Nozzle diameter({})",
-                    printer_borrow.printer_number, ams_trays_dirty, printer_borrow.virty_tray_dirty, printer_borrow.nozzle_diameter_dirty
+                    "[{}] Dirty status: AMS slots({}), Ext slot({}), Nozzle diameter({}), AmsExists: ({}), Tray Exists: ({}), Try Read Done ({}), Calibrations ({})",
+                    printer_borrow.printer_number, ams_trays_dirty, printer_borrow.virty_tray_dirty, printer_borrow.nozzle_diameter_dirty,
+                    printer_borrow.ams_exist_bits_dirty, printer_borrow.tray_exist_bits_dirty, printer_borrow.tray_read_done_bits_dirty, printer_borrow.calibrations_dirty
                 );
                 printer_serial = Some(printer_borrow.printer_serial.clone());
-                let printer_state = PrinterPersistentState {
-                    ams_trays: printer_borrow.ams_trays().to_vec(),
+                let printer_state = PrinterPersistentState { 
+                    ams_trays: Cow::Borrowed(printer_borrow.ams_trays()),
                     virt_tray: Cow::Borrowed(printer_borrow.virt_tray()),
                     nozzle_diameter: printer_borrow.inner_nozzle_diameter.clone(),
-                    ams_exist_bits: printer_borrow.ams_exist_bits,
-                    tray_exist_bits: printer_borrow.tray_exist_bits,
-                    tray_read_done_bits: printer_borrow.tray_read_done_bits,
+                    ams_exist_bits: printer_borrow.inner_ams_exist_bits,
+                    tray_exist_bits: printer_borrow.inner_tray_exist_bits,
+                    tray_read_done_bits: printer_borrow.inner_tray_read_done_bits,
+                    calibrations: Cow::Borrowed(&printer_borrow.calibrations),
                 };
                 printer_state_str = Some(serde_json::to_string(&printer_state).unwrap());
             }
@@ -415,43 +447,22 @@ impl BambuPrinter {
             printer_connectivity_ok: None,
             inner_nozzle_diameter: None,
             nozzle_diameter_dirty: false,
-            inner_ams_trays: [
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-                unknown.clone(),
-            ],
+            inner_ams_trays: alloc::vec![Tray::default();24],
             inner_virt_tray: unknown,
             ams_trays_dirty: [false; 24],
             virty_tray_dirty: false,
+            ams_exist_bits_dirty: false,
+            tray_exist_bits_dirty: false,
+            tray_read_done_bits_dirty: false,
+            calibrations_dirty: false,
             calibrations: Vec::new(),
             write_packets,
             observers: Vec::new(),
             app_config,
-            tray_exist_bits: None,
-            tray_read_done_bits: None,
+            inner_tray_exist_bits: None,
+            inner_tray_read_done_bits: None,
             tray_reading_bits: None,
-            ams_exist_bits: None,
+            inner_ams_exist_bits: None,
             restart_printer,
             log_filter,
             printer_was_disconnected: true,
@@ -665,12 +676,12 @@ impl BambuPrinter {
     pub fn get_updated_tray(&self, old_tray: &Tray, tray_update: Option<&PrintTray>, tray_id: Option<usize>) -> Option<Tray> {
         if let Some(tray_id) = tray_id {
             // AMS tray
-            if let Some(tray_exist_bits) = self.tray_exist_bits {
+            if let Some(tray_exist_bits) = self.tray_exist_bits() {
                 let tray_exist = ((tray_exist_bits >> tray_id) & 0x01) != 0;
 
                 if tray_exist {
                     let tray_reading = self.tray_reading_bits.is_some_and(|x| ((x >> tray_id) & 0x01) != 0);
-                    let tray_read_done = self.tray_read_done_bits.is_some_and(|x| ((x >> tray_id) & 0x01) != 0);
+                    let tray_read_done = self.tray_read_done_bits().is_some_and(|x| ((x >> tray_id) & 0x01) != 0);
 
                     let mut new_tray = if let Some(tray_update) = tray_update {
                         if let Ok(tray_update) = self.tray_from_update(tray_update) {
@@ -989,6 +1000,7 @@ impl BambuPrinter {
                         let calibration = Calibration::from(filament, nozzle_diameter);
                         self.calibrations.push(calibration);
                     }
+                    self.calibrations_dirty = true;
                 }
             }
         }
@@ -1108,14 +1120,14 @@ impl BambuPrinter {
     #[allow(non_snake_case)]
     pub fn process_print_message__ams(&mut self, ams: &PrintAms) -> (bool, HashMap<usize, TagInformation>, bool) {
         let mut change_made = false;
-        let prev_tray_exist_bits = self.tray_exist_bits;
+        let prev_tray_exist_bits = *self.tray_exist_bits();
 
         // first check which ams's exist
         if let Some(ams_exist_bits) = &ams.ams_exist_bits {
             let ams_exist_bits = u32::from_str_radix(ams_exist_bits, 16);
             if let Ok(ams_exist_bits) = ams_exist_bits {
-                if self.ams_exist_bits.is_none() || self.ams_exist_bits.unwrap() != ams_exist_bits {
-                    self.ams_exist_bits = Some(ams_exist_bits);
+                if self.ams_exist_bits().is_none() || *self.ams_exist_bits() != Some(ams_exist_bits) {
+                    self.set_ams_exist_bits(Some(ams_exist_bits));
                     change_made = true;
                 }
             }
@@ -1130,8 +1142,8 @@ impl BambuPrinter {
         // tray_exist_bits - which trays contain a spool
         if let Some(tray_exist_bits) = &ams.tray_exist_bits {
             if let Ok(tray_exist_bits) = u32::from_str_radix(tray_exist_bits, 16) {
-                if self.tray_exist_bits != Some(tray_exist_bits) {
-                    self.tray_exist_bits = Some(tray_exist_bits);
+                if *self.tray_exist_bits() != Some(tray_exist_bits) {
+                    self.set_tray_exist_bits(Some(tray_exist_bits));
                     change_made = true;
                 }
             }
@@ -1139,8 +1151,8 @@ impl BambuPrinter {
         // tray_read_done - which trays (from those that exist) that have been "read" (meaning ready from ams perspective)
         if let Some(tray_read_done_bits) = &ams.tray_read_done_bits {
             if let Ok(tray_read_done_bits) = u32::from_str_radix(tray_read_done_bits, 16) {
-                if self.tray_read_done_bits != Some(tray_read_done_bits) {
-                    self.tray_read_done_bits = Some(tray_read_done_bits);
+                if *self.tray_read_done_bits() != Some(tray_read_done_bits) {
+                    self.set_tray_read_done_bits(Some(tray_read_done_bits));
                     change_made = true;
                 }
             }
@@ -1183,7 +1195,7 @@ impl BambuPrinter {
 
         let mut _derived_ams_exist_bits = 0;
         for tray_id in 0..self.ams_trays().len() {
-            let spool_removed = if let (Some(prev_tray_exist_bits), Some(new_tray_exist_bits)) = (&prev_tray_exist_bits, &self.tray_exist_bits) {
+            let spool_removed = if let (Some(prev_tray_exist_bits), Some(new_tray_exist_bits)) = (&prev_tray_exist_bits, self.tray_exist_bits()) {
                 (((prev_tray_exist_bits >> tray_id) & 0x01) != 0) && (((new_tray_exist_bits >> tray_id) & 0x01) == 0)
             } else {
                 false
@@ -2025,7 +2037,7 @@ impl From<&Calibration> for OldTagCalibration {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PrinterPersistentState<'a> {
-    pub ams_trays: Vec<Tray>,
+    pub ams_trays: Cow<'a, Vec<Tray>>,
     pub virt_tray: Cow<'a, Tray>,
     pub nozzle_diameter: Option<String>,
     #[serde(default)]
@@ -2034,6 +2046,8 @@ pub struct PrinterPersistentState<'a> {
     pub tray_exist_bits: Option<u32>,
     #[serde(default)]
     pub tray_read_done_bits: Option<u32>,
+    #[serde(default)]
+    pub calibrations: Cow<'a, Vec<Calibration>>,
 }
 
 fn formatted_k_value(k: &str) -> String {
@@ -2079,7 +2093,7 @@ impl Calibration {
         }
     }
 
-    pub fn new_minimal(diameter: &str, k_value: &str, filament_id: &str, setting_id: &str, name: &str, cali_idx: i32) -> Self {
+    pub fn _new_minimal(diameter: &str, k_value: &str, filament_id: &str, setting_id: &str, name: &str, cali_idx: i32) -> Self {
         Self {
             diameter: diameter.to_string(),
             k_value: formatted_k_value(k_value),
@@ -2271,14 +2285,14 @@ pub async fn incoming_messages_task(
                                         if !skip {
                                             let previous_tray_bits = TrayBits {
                                                 tray_reading_bits: bambu_printer.borrow().tray_reading_bits,
-                                                tray_read_done_bits: bambu_printer.borrow().tray_read_done_bits,
-                                                tray_exist_bits: bambu_printer.borrow().tray_exist_bits,
+                                                tray_read_done_bits: *bambu_printer.borrow().tray_read_done_bits(),
+                                                tray_exist_bits: *bambu_printer.borrow().tray_exist_bits(),
                                             };
                                             let (change_made, removed_tags) = (*bambu_printer.borrow_mut()).process_print_message(&print.print);
                                             let updated_tray_bits = TrayBits {
                                                 tray_reading_bits: bambu_printer.borrow().tray_reading_bits,
-                                                tray_read_done_bits: bambu_printer.borrow().tray_read_done_bits,
-                                                tray_exist_bits: bambu_printer.borrow().tray_exist_bits,
+                                                tray_read_done_bits: *bambu_printer.borrow().tray_read_done_bits(),
+                                                tray_exist_bits: *bambu_printer.borrow().tray_exist_bits(),
                                             };
                                             if change_made {
                                                 (*bambu_printer.borrow_mut()).update_ams_trays_done(

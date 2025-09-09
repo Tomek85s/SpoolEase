@@ -1291,7 +1291,7 @@ impl ViewModel {
 
         let ui = self.ui_weak.unwrap();
         // ----- handle number of ams's and curr_ams -----
-        if let Some(mut ams_exist_bits) = bambu_printer.ams_exist_bits {
+        if let Some(mut ams_exist_bits) = bambu_printer.ams_exist_bits() {
             let mut ams_exist_vec = Vec::<i32>::new();
             let mut first_ams = -1;
             for ams_id in 0..=3 + 8 {
