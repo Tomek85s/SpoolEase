@@ -174,6 +174,8 @@ impl ViewModel {
             console_available_gcode_tasks: 0,
         };
         let view_model_rc = Rc::new(RefCell::new(view_model));
+        
+        view_model_rc.borrow().store.start(view_model_rc.clone());
 
         // hold a reference to itself to hand over to others, this is a 'memory leak' but object never gets destroyed so eaiser than weak reference
         view_model_rc.borrow_mut().view_model = Some(view_model_rc.clone());
@@ -1460,7 +1462,7 @@ impl ViewModel {
         };
     }
 
-    fn get_k_info_from_old_tag(&self, tag_with_k: &TagInformation) -> Option<KInfo> {
+    pub fn get_k_info_from_old_tag(&self, tag_with_k: &TagInformation) -> Option<KInfo> {
         if !tag_with_k.calibrations.is_empty() {
             let calibration = tag_with_k.calibrations.iter().next().unwrap();
             let diameter = calibration.0;

@@ -3,6 +3,7 @@ use embassy_time::Instant;
 use hashbrown::HashMap;
 use once_cell::unsync::OnceCell;
 use serde::{Deserialize, Serialize};
+use serde_json::Deserializer;
 use shared::utils::{
     deserialize_bool_yn_empty_n, deserialize_f32_base64, deserialize_optional, deserialize_optional_bool_yn, serialize_bool_yn, serialize_f32_base64,
     serialize_optional_bool_yn,
@@ -20,28 +21,33 @@ use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel};
 use framework::{
     debug, error, info, mk_static,
     ntp::InstantExt,
-    prelude::Framework,
+    prelude::{Framework, SDCardStoreErrorSource},
     settings::{FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES},
-    term_error, term_info,
+    term_error, term_info, warn,
 };
 
 use crate::{
     bambu::{FilamentInfo, KInfo, KNozzleId, TagInformation},
     csvdb::{CsvDb, CsvDbError, CsvDbId},
+    view_model::ViewModel,
 };
 
-#[derive(Snafu, Debug)]
-pub enum InternalError {
-    BadId,
-}
+// #[derive(Snafu, Debug)]
+// pub enum InternalError {
+//     BadId,
+// }
+const STORE_VER: &str = "1.1.0";
 
 #[derive(Snafu, Debug)]
 pub enum StoreError {
     #[snafu(display("Too many store operations pending"))]
     TooManyOps,
 
-    #[snafu(display("CsvDbError : {source}"))]
+    #[snafu(display("CsvDbError : {source:?}"))]
     CsvDbError { source: CsvDbError },
+
+    #[snafu(display("SDCard File Operation Error {source:?}"))]
+    Store { source: SDCardStoreErrorSource },
 
     #[snafu(display("Internal store software logic error"))]
     InternalError,
@@ -54,6 +60,9 @@ pub enum StoreError {
 
     #[snafu(display("Missing required id for operation in record"))]
     MissingId,
+
+    #[snafu(display("Bad Id for operation"))]
+    BadId,
 
     #[snafu(display("Id not found in databse"))]
     IdNotFound,
@@ -149,6 +158,7 @@ pub struct Store {
     last_spool_id: RefCell<i32>,
     tag_id_index: RefCell<HashMap<String, String>>,
     pub initialized: RefCell<bool>,
+    store_rc: RefCell<Option<Rc<Store>>>,
 }
 
 impl Store {
@@ -162,9 +172,19 @@ impl Store {
             last_spool_id: RefCell::new(0),
             tag_id_index: RefCell::new(HashMap::new()),
             initialized: RefCell::new(false),
+            store_rc: RefCell::new(None),
         });
-        framework.borrow().spawner.spawn(store_task(framework.clone(), store.clone())).ok();
+        *store.store_rc.borrow_mut() = Some(store.clone());
         store
+    }
+
+    pub fn start(&self, view_model: Rc<RefCell<ViewModel>>) {
+        let store = self.store_rc.borrow_mut().clone().unwrap();
+        self.framework
+            .borrow()
+            .spawner
+            .spawn(store_task(self.framework.clone(), store, view_model))
+            .ok();
     }
 
     pub fn subscribe(&self, observer: alloc::rc::Weak<RefCell<dyn StoreObserver>>) {
@@ -345,7 +365,9 @@ impl Store {
             .map_err(|err| StoreError::ExtFileUnread {
                 error: format!("{err} reading '{spool_rec_ext_file_path}'"),
             })?;
-        let spool_rec_ext = serde_json::from_str::<SpoolRecordExt>(&ext_str).context(ExtFormatSnafu)?;
+        let mut de = Deserializer::from_str(&ext_str);
+        let spool_rec_ext = SpoolRecordExt::deserialize(&mut de).context(ExtFormatSnafu)?;
+        // let spool_rec_ext = serde_json::from_str::<SpoolRecordExt>(&ext_str).context(ExtFormatSnafu)?;
         Ok(spool_rec_ext)
     }
 
@@ -382,24 +404,125 @@ impl Store {
             Err(StoreError::MissingId)
         }
     }
+
+    pub async fn store_spool_rec_ext(&self, id: &str, spool_rec_ext: &SpoolRecordExt) -> Result<(), StoreError> {
+        let spool_rec_ext_file_path = spool_rec_ext_file_path(&id)?;
+        let file_store = self.framework.borrow().file_store();
+        let mut file_store = file_store.lock().await;
+        let s = serde_json::to_string(&spool_rec_ext).map_err(|_err| StoreError::InternalError)?;
+        file_store
+            .create_write_file_str(&spool_rec_ext_file_path, &s)
+            .await
+            .context(StoreSnafu)?;
+        Ok(())
+    }
+    
+    #[allow(unused_variables)]
+    pub async fn upgrade_versions(
+        &self,
+        db_version: semver::Version,
+        current_version: semver::Version,
+        view_model: Rc<RefCell<ViewModel>>,
+    ) -> Result<(), StoreError> {
+        if let Some(spools_db) = self.spools_db.get() {
+            let spool_ids : Vec<_> = {
+                let records = spools_db.records.borrow();
+                records.keys().cloned().collect()
+            };
+            for spool_id in spool_ids {
+                match self.get_spool_ext_by_id(&spool_id).await {
+                    Ok(mut spool_rec_ext) => {
+                        if let Some(tag_desciptor) = &spool_rec_ext.tag {
+                            match TagInformation::from_descriptor(tag_desciptor) {
+                                Ok(tag_info) => {
+                                    if tag_info.calibrations.is_empty() || tag_info.calibrations_printer_uuid.is_empty() {
+                                        continue;
+                                    }
+                                    let k_info = view_model.borrow().get_k_info_from_old_tag(&tag_info);
+                                    if let Some(k_info) = k_info {
+                                        info!("Upgrading spool {} with k_info {:?}", spool_id, k_info);
+                                        spool_rec_ext.k_info = Some(k_info);
+                                        if let Err(err) = self.store_spool_rec_ext(&spool_id, &spool_rec_ext).await {
+                                            // TODO: undo upgrade and restore old version of file system?
+                                            error!("Error storing ext data for spool {}, ignoring : {err:?}", spool_id);
+                                        } else {
+                                            spools_db.records.borrow_mut().get_mut(&spool_id).unwrap().data.ext_has_k = true;
+                                        }
+                                    } else {
+                                        warn!("Couldn't convert tag information to new K information for spool {}", spool_id);
+                                    }
+                                }
+                                Err(err) => {
+                                    error!("Error parsing tag descriptor for spool {}, ignoring : {err:?}", spool_id);
+                                    continue;
+                                }
+                            }
+                        } else {
+                            warn!("No tag descriptor found for spool {}, ignoring", spool_id);
+                        }
+                    }
+                    Err(err) => {
+                        error!("Error reading extra data for spool {}, ignoring : {err:?}", spool_id);
+                    }
+                }
+            }
+            spools_db.save_all_records_only_before_use().await.context(CsvDbSnafu)?;
+            spools_db.update_version(STORE_VER).await.context(CsvDbSnafu)?;
+        }
+        Ok(())
+    }
 }
 
 #[embassy_executor::task] // up to two printers in parallel
-pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
+pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, view_model: Rc<RefCell<ViewModel>>) {
     let db_available;
     {
         debug!("Started store_task");
         let file_store = framework.borrow().file_store();
-        match CsvDb::<SpoolRecord, _, FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES>::new(file_store.clone(), "/store/spools", 1024, 200).await {
+        match CsvDb::<SpoolRecord, _, FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES>::new(file_store.clone(), "/store/spools", 1024, 200, STORE_VER).await
+        {
             Ok(mut db) => match db.start(true, true).await {
                 Ok(_) => {
-                    store
-                        .spools_db
-                        .set(db)
-                        .map_err(|_e| "Fatal Internal Error: Can't assign spools_db to once_cell?")
-                        .unwrap();
-                    term_info!("Opened spools database");
-                    db_available = true;
+                    let mut db_version = {
+                        let db_inner = db.inner.borrow();
+                        db_inner.db_meta.version.clone()
+                    };
+                    if db_version == "1" {
+                        db_version = "1.0.0".to_string();
+                    }
+                    match semver::Version::parse(db_version.as_str()) {
+                        Ok(db_version) => {
+                            let current_version = semver::Version::parse(STORE_VER).unwrap();
+                            if current_version < db_version {
+                                term_info!("Store version is {db_version), this firmware supports up to {current_version}");
+                                db_available = false;
+                            } else {
+                                // currently upgrade is only for ext, so done after loading the db
+                                store
+                                    .spools_db
+                                    .set(db)
+                                    .map_err(|_e| "Fatal Internal Error: Can't assign spools_db to once_cell?")
+                                    .unwrap();
+                                term_info!("Opened spools database");
+
+                                if current_version > db_version {
+                                    term_info!("Upgrading store from {db_version} to (current_version}");
+                                    if let Err(err) = store.upgrade_versions(db_version, current_version, view_model.clone()).await {
+                                        term_info!("Error upgrading store : {:?}", err);
+                                        db_available = false;
+                                    } else {
+                                        db_available = true;
+                                    } 
+                                } else {
+                                    db_available = true;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            term_error!("Unparsable store DB version {} {:?}",db_version, err);
+                            db_available = false;
+                        }
+                    }
                 }
                 Err(e) => {
                     term_error!("Failed to start spools database (and load data): {:?}", e);
@@ -737,6 +860,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                     // Write extr info file  ////////////////////////////////////////////////////////////////
                     //////////////////////////////////////////////////////////////////////////////////////////
 
+                    // TODO: switch to save_spool_rec_ext()
                     if let Ok(spool_rec_ext_file_path) = spool_rec_ext_file_path(&spool_rec.id) {
                         let file_store = framework.borrow().file_store();
                         let mut file_store = file_store.lock().await;
@@ -745,7 +869,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>) {
                             k_info,
                         };
                         match serde_json::to_string(&spool_rec_ext) {
-                            Ok(s) => match file_store.write_file_str(&spool_rec_ext_file_path, 0, &s, false).await {
+                            Ok(s) => match file_store.create_write_file_str(&spool_rec_ext_file_path, &s).await {
                                 Ok(_) => {
                                     info!("Stored extra spool {} information to file {spool_rec_ext_file_path}", spool_rec.id);
                                 }
@@ -898,13 +1022,13 @@ fn tag_id_hex(tag_id: &[u8]) -> String {
     hex::encode_upper(tag_id)
 }
 
-fn spool_rec_ext_file_path(ext_rec_id: &str) -> Result<String, InternalError> {
+fn spool_rec_ext_file_path(ext_rec_id: &str) -> Result<String, StoreError> {
     if let Ok(id_num) = ext_rec_id.parse::<i32>() {
         let folder_num = ((id_num / 16) % 16) + 1;
         let file_path = format!("/store/spools.ext/{folder_num}/{id_num}.jsn");
         Ok(file_path)
     } else {
-        Err(InternalError::BadId)
+        Err(StoreError::BadId)
     }
 }
 

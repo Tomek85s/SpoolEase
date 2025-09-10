@@ -248,18 +248,28 @@ impl BambuPrinter {
 
         // This section can be potentially removed in the future since state consume_since_weight should be available and updated
         // This is only for transition time where the there was no consumed_since_weight in the metainfo for correct display calculation
-        for tray in self.inner_ams_trays.iter_mut().chain(core::iter::once(&mut self.inner_virt_tray)) {
-            if let Some(tag_info) = &tray.meta_info.tag_info {
-                if tray.meta_info.consumed_since_weight == 0.0 {
-                    if let Some(tag_id) = &tag_info.tag_id {
-                        let spool_record = store.get_spool_by_tag_id(tag_id);
-                        if let Some(spool_record) = spool_record {
-                            tray.meta_info.consumed_since_weight = spool_record.consumed_since_weight;
-                        }
+        for tray_id in (0..self.ams_trays().len()-1).chain(core::iter::once(254)) {
+            if self.get_any_tray(tray_id).meta_info.consumed_since_weight == 0.0 {
+                if let Some(tag_id) = self.get_any_tray(tray_id).meta_info.tag_info.as_ref().and_then(|v| v.tag_id.clone()) {
+                    let spool_record = store.get_spool_by_tag_id(&tag_id);
+                    if let Some(spool_record) = spool_record {
+                        self.update_any_tray(tray_id, |tray| tray.meta_info.consumed_since_weight = spool_record.consumed_since_weight);
                     }
                 }
             }
         }
+        // for tray in self.inner_ams_trays.iter_mut().chain(core::iter::once(&mut self.inner_virt_tray)) {
+        //     if let Some(tag_info) = &tray.meta_info.tag_info {
+        //         if tray.meta_info.consumed_since_weight == 0.0 {
+        //             if let Some(tag_id) = &tag_info.tag_id {
+        //                 let spool_record = store.get_spool_by_tag_id(tag_id);
+        //                 if let Some(spool_record) = spool_record {
+        //                     tray.meta_info.consumed_since_weight = spool_record.consumed_since_weight;
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
     }
 
     pub async fn load_printer_state(framework: &Rc<RefCell<Framework>>, printer: &Rc<RefCell<BambuPrinter>>, store: &Rc<Store>) {
@@ -1807,6 +1817,7 @@ pub enum TrayState {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#[derive(Debug)]
 pub enum Error {
     ParseError,
     MissingFields,

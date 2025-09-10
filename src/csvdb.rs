@@ -3,37 +3,37 @@ use core::{cell::RefCell, str::Utf8Error};
 use alloc::{
     format,
     rc::Rc,
-        string::{String, ToString},
-        vec::Vec,
-    };
-    use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-    use embedded_hal_async::spi::SpiDevice;
-    use hashbrown::HashMap;
-    use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    string::{String, ToString},
+    vec::Vec,
+};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embedded_hal_async::spi::SpiDevice;
+use hashbrown::HashMap;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-    use snafu::prelude::*;
+use snafu::prelude::*;
 
-    use framework::prelude::{SDCardStore, SDCardStoreErrorSource};
+use framework::prelude::{SDCardStore, SDCardStoreErrorSource};
 
-    #[derive(Snafu)]
-    pub enum CsvDbError {
-        #[snafu(display("SDCard File Operation Error {source:?}"))]
-        Store { source: SDCardStoreErrorSource },
+#[derive(Snafu)]
+pub enum CsvDbError {
+    #[snafu(display("SDCard File Operation Error {source:?}"))]
+    Store { source: SDCardStoreErrorSource },
 
-        #[snafu(display("Failed to parse database metadata : {source}"))]
-        Metadata { source: serde_json::error::Error },
+    #[snafu(display("Failed to parse database metadata : {source}"))]
+    Metadata { source: serde_json::error::Error },
 
-        #[snafu(display("Failed to deserialize record \"{record}\" : {source}"))]
-        Deserialize { record: String, source: serde_csv_core::de::Error },
+    #[snafu(display("Failed to deserialize record \"{record}\" : {source}"))]
+    Deserialize { record: String, source: serde_csv_core::de::Error },
 
-        #[snafu(display("Failed to serialize record: {source}"))]
-        Serialize { source: serde_csv_core::ser::Error },
+    #[snafu(display("Failed to serialize record: {source}"))]
+    Serialize { source: serde_csv_core::ser::Error },
 
-        #[snafu(display("Failed to UTF8 decode database : {source}"))]
-        Utf8 { source: Utf8Error },
+    #[snafu(display("Failed to UTF8 decode database : {source}"))]
+    Utf8 { source: Utf8Error },
 
     #[snafu(display(" Internal Error : {details}"))]
-    Internal { details: String }
+    Internal { details: String },
 }
 
 impl core::fmt::Debug for CsvDbError {
@@ -73,15 +73,15 @@ where
 }
 
 #[derive(Serialize, Deserialize)]
-struct DbMetaFile {
-    version: String,
+pub struct DbMetaFile {
+    pub version: String,
 }
 
-struct CsvDbInner {
+pub struct CsvDbInner {
     db_file_name: String,
     dbm_file_name: String,
     max_record_width: usize,
-    db_meta: DbMetaFile,
+    pub db_meta: DbMetaFile,
 }
 
 pub struct CsvDb<T, SPI: SpiDevice, const MAX_DIRS: usize, const MAX_FILES: usize>
@@ -89,7 +89,7 @@ where
     T: CsvDbId + Serialize + DeserializeOwned + PartialEq + core::fmt::Debug,
 {
     sdcard: Rc<Mutex<CriticalSectionRawMutex, SDCardStore<SPI, MAX_DIRS, MAX_FILES>>>,
-    inner: RefCell<CsvDbInner>,
+    pub inner: RefCell<CsvDbInner>,
     pub records: Rc<RefCell<HashMap<String, CsvRecordInfo<T>>>>,
 }
 
@@ -102,6 +102,7 @@ where
         db_name: &str,
         max_record_width: usize,
         min_capacity: usize,
+        ver_if_new: &str,
     ) -> Result<Self, CsvDbError> {
         let dbm_file_name = format!("{db_name}.dbm");
         let db_file_name = format!("{db_name}.db");
@@ -111,7 +112,9 @@ where
         let mut sdcard = sdcard.lock().await;
         let mut dbm_str = sdcard.read_create_str(&dbm_file_name).await.context(StoreSnafu)?;
         if dbm_str.is_empty() {
-            let dbm = DbMetaFile { version: "1".to_string() };
+            let dbm = DbMetaFile {
+                version: ver_if_new.to_string(),
+            };
             dbm_str = serde_json::to_string(&dbm).unwrap();
             sdcard.append_text(&dbm_file_name, &dbm_str).await.context(StoreSnafu)?;
             sdcard.create_file(&db_file_name).await.context(StoreSnafu)?;
@@ -161,7 +164,9 @@ where
         }
 
         if backup {
-            let db_filename_prefix = db_filename.strip_suffix(".db").ok_or_else(||CsvDbError::Internal { details: "DB filename doesn't end with '.db.'".to_string() })?;
+            let db_filename_prefix = db_filename.strip_suffix(".db").ok_or_else(|| CsvDbError::Internal {
+                details: "DB filename doesn't end with '.db.'".to_string(),
+            })?;
             let backup_file_name = format!("{}.db1", db_filename_prefix);
             sdcard.create_write_file_str(&backup_file_name, db_str).await.context(StoreSnafu)?;
         }
@@ -169,6 +174,7 @@ where
         // Now pack if requested
         // Check items size and not use current size in case of type change and serialize longer than original read data
         if pack {
+            // TODO: use the save_all_records_only_before_use instead this code after see it is ok
             let mut record_buffer = alloc::vec![0u8;self.inner.borrow().max_record_width];
             let mut writer = serde_csv_core::Writer::new();
             let mut length_required = 0;
@@ -188,6 +194,51 @@ where
             sdcard.create_write_file_bytes(&db_filename, &file_buffer).await.context(StoreSnafu)?;
         }
 
+        Ok(())
+    }
+    pub async fn backup_with_ext(&self, ext: &str) -> Result<(), CsvDbError> {
+        let mut sdcard = self.sdcard.lock().await;
+        let db_filename = self.inner.borrow().db_file_name.clone();
+        let file_content = sdcard.read_file_str(&db_filename).await.context(StoreSnafu)?;
+        let db_filename_prefix = db_filename.strip_suffix(".db").ok_or_else(|| CsvDbError::Internal {
+            details: "DB filename doesn't end with '.db.'".to_string(),
+        })?;
+        sdcard
+            .create_write_file_str(&format!("{db_filename_prefix}.{ext}"), &file_content)
+            .await
+            .context(StoreSnafu)?;
+        Ok(())
+    }
+
+    pub async fn save_all_records_only_before_use(&self) -> Result<(), CsvDbError> {
+        let mut record_buffer = alloc::vec![0u8;self.inner.borrow().max_record_width];
+        let mut writer = serde_csv_core::Writer::new();
+        let mut length_required = 0;
+        let mut records = self.records.take();
+        for record in records.iter() {
+            let serialized_len = writer.serialize(&record.1.data, record_buffer.as_mut_slice()).context(SerializeSnafu)?;
+            length_required += serialized_len;
+        }
+        let mut file_buffer = alloc::vec![b'-'; length_required];
+        let mut pos = 0;
+        for record in records.iter_mut() {
+            let length_written = writer.serialize(&record.1.data, &mut file_buffer[pos..]).context(SerializeSnafu)?;
+            record.1.offset = pos as u32;
+            record.1.length = length_written;
+            pos += length_written;
+        }
+        *self.records.borrow_mut() = records;
+        let db_filename = self.inner.borrow().db_file_name.clone();
+        let mut sdcard = self.sdcard.lock().await;
+        sdcard.create_write_file_bytes(&db_filename, &file_buffer).await.context(StoreSnafu)?;
+        Ok(())
+    }
+    pub async fn update_version(&self, version: &str) -> Result<(), CsvDbError> {
+        self.inner.borrow_mut().db_meta.version = version.to_string();
+        let dbm_file_name = self.inner.borrow().dbm_file_name.clone();
+        let dbm_str = serde_json::to_string(&self.inner.borrow().db_meta).unwrap();
+        let mut sdcard = self.sdcard.lock().await;
+        sdcard.create_write_file_str(&dbm_file_name, &dbm_str).await.context(StoreSnafu)?;
         Ok(())
     }
 
