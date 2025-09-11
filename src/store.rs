@@ -67,8 +67,8 @@ pub enum StoreError {
     #[snafu(display("Id not found in databse"))]
     IdNotFound,
 
-    #[snafu(display("Extended record format error"))]
-    ExtFileUnread { error: String },
+    #[snafu(display("Can't read extended file"))]
+    ExtFileReadFailure { error: String },
 
     #[snafu(display("Extended record format error"))]
     ExtFormat { source: serde_json::error::Error },
@@ -277,8 +277,10 @@ impl Store {
             match spools_db.insert(spool_record).await.context(CsvDbSnafu)? {
                 true => {
                     *self.last_spool_id.borrow_mut() = new_spool_id;
-                    let mut spool_rec_ext = self.get_spool_ext_by_id(&new_spool_id.to_string()).await?;
-                    spool_rec_ext.k_info = k_info;
+                    let spool_rec_ext = SpoolRecordExt {
+                        tag: None,
+                        k_info,
+                    };
                     self.store_spool_rec_ext(&new_spool_id.to_string(), &spool_rec_ext).await?;
                     Ok(new_spool_id.to_string())
                 }
@@ -327,7 +329,14 @@ impl Store {
             };
 
             spools_db.insert(updated_record).await.context(CsvDbSnafu)?;
-            let mut spool_rec_ext = self.get_spool_ext_by_id(&spool_record.id).await?;
+            let mut spool_rec_ext = 
+                match self.get_spool_ext_by_id(&spool_record.id).await {
+                    Ok(spool_rec_ext) => spool_rec_ext,
+                    Err(err) => {
+                        error!("Error loading extended info when editing file, using empty as baseline for edit: {err:?}");
+                        SpoolRecordExt::default()
+                    }
+                };
             spool_rec_ext.k_info = k_info;
             self.store_spool_rec_ext(&spool_record.id, &spool_rec_ext).await?;
             Ok(())
@@ -369,7 +378,7 @@ impl Store {
         let ext_str = file_store
             .read_file_str(&spool_rec_ext_file_path)
             .await
-            .map_err(|err| StoreError::ExtFileUnread {
+            .map_err(|err| StoreError::ExtFileReadFailure {
                 error: format!("{err} reading '{spool_rec_ext_file_path}'"),
             })?;
         let mut de = Deserializer::from_str(&ext_str);
@@ -608,7 +617,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
                     // This is tricky - here is the logic, below in code comments are repeated for clarity
                     // The outtpub is eventually use_spool_id - which record to write to eventually, existing and which or new
                     //
-                    // If there isn't an ID
+                    // If there isn't an ID ??(so user didn't enter ID on encode, or it's a scan of a tag)
                     //   if found matching_spool_id for tag_id
                     //     if encode-tag
                     //       strike matching_spool_id
