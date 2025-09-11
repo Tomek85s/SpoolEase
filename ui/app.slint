@@ -369,6 +369,8 @@ export global AppState {
     }
 
     public function encode-select-tray(tray-index: int) {
+        // note, every change to curr-encode-request automatically recalculate display
+        // so changes here are immediately reflected in UI
         clear-curr-encoding-request();
         AppBackend.calc-encode-request-display(FilamentInfoMode.Encode);
         self.curr-encode-request.tray-index = tray-index;

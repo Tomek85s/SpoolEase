@@ -1001,6 +1001,10 @@ impl ViewModel {
             .unwrap()
             .global::<crate::app::AppBackend>()
             .on_notify_start_encode(move |tray_id| {
+                // 998 - From Blank
+                // 999 - From data in Staging (when from staging, duplicate the DATA in staging, not use the same ID)
+                // return true if based on an already existing tag
+                //        false if not
                 if tray_id == 999 {
                     let staging_tag_info = moved_view_model.borrow().filament_staging.borrow().tag_info().clone();
                     if staging_tag_info.is_some() {

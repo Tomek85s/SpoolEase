@@ -1789,7 +1789,6 @@ impl BambuPrinter {
 // IMPORTANT: Don't change names, will hurt persistence
 pub struct TrayMetaInfo {
     pub tag_info: Option<TagInformation>, // calibration for nozzles
-    pub k_info: Option<KInfo>,
     #[serde(default)]
     pub consumed_since_load: f32,
     #[serde(default)]
