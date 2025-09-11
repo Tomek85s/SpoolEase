@@ -358,7 +358,7 @@ pub async fn generic_mqtt_task<
     let stack = framework.borrow().stack;
     let tls = framework.borrow().tls;
     let printer_log_id = bambu_printer.borrow().printer_number;
-    let printer_name = bambu_printer.borrow().printer_name.clone();
+    let printer_name = bambu_printer.borrow().printer_name().clone();
 
     let mut socket_rx_buffer = vec![0u8; rx_socket_buffer_size];
     let mut socket_tx_buffer = vec![0u8; tx_socket_buffer_size];

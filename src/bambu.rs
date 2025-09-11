@@ -30,7 +30,9 @@ use embassy_sync::{
     blocking_mutex::{
         raw::{CriticalSectionRawMutex, NoopRawMutex},
         Mutex,
-    }, channel::Channel, pubsub::PubSubChannel
+    },
+    channel::Channel,
+    pubsub::PubSubChannel,
 };
 use embassy_time::{with_timeout, Duration, Timer};
 use hashbrown::HashMap;
@@ -72,7 +74,7 @@ pub struct BambuPrinter {
     pub auto_restore_k: bool,
     pub track_print_consume: bool,
     pub fetch_3mf: Fetch3mf,
-    pub printer_name: String,
+    pub inner_printer_name: String,
     pub printer_selector_name: String, // configured_printer_name or if not set then printer_serial which is always available
     pub printer_ip: Ipv4Address,
     pub printer_uuid_to_encode: String,
@@ -87,6 +89,7 @@ pub struct BambuPrinter {
     tray_read_done_bits_dirty: bool,
     ams_exist_bits_dirty: bool,
     calibrations_dirty: bool,
+    printer_name_dirty: bool,
     pub calibrations: Vec<Calibration>,
     write_packets: Rc<WritePacketsChannel>,
     #[allow(dead_code)]
@@ -122,6 +125,15 @@ pub trait BambuPrinterObserver {
 
 // Special access to trays fields for dirty tracking
 impl BambuPrinter {
+    pub fn printer_name(&self) -> &String {
+        &self.inner_printer_name
+    }
+    pub fn set_printer_name(&mut self, new_printer_name: &str) {
+        if self.inner_printer_name != new_printer_name {
+            self.inner_printer_name = new_printer_name.to_string();
+            self.printer_name_dirty = true;
+        }
+    }
     pub fn ams_trays(&self) -> &Vec<Tray> {
         &self.inner_ams_trays
     }
@@ -245,10 +257,11 @@ impl BambuPrinter {
         self.inner_tray_exist_bits = state.tray_exist_bits;
         self.inner_tray_read_done_bits = state.tray_read_done_bits;
         self.calibrations = core::mem::take(state.calibrations.to_mut());
+        self.inner_printer_name = state.printer_name.clone();
 
         // This section can be potentially removed in the future since state consume_since_weight should be available and updated
         // This is only for transition time where the there was no consumed_since_weight in the metainfo for correct display calculation
-        for tray_id in (0..self.ams_trays().len()-1).chain(core::iter::once(254)) {
+        for tray_id in (0..self.ams_trays().len() - 1).chain(core::iter::once(254)) {
             if self.get_any_tray(tray_id).meta_info.consumed_since_weight == 0.0 {
                 if let Some(tag_id) = self.get_any_tray(tray_id).meta_info.tag_info.as_ref().and_then(|v| v.tag_id.clone()) {
                     let spool_record = store.get_spool_by_tag_id(&tag_id);
@@ -310,14 +323,22 @@ impl BambuPrinter {
             }
             let ams_trays_dirty = printer_borrow.ams_trays_dirty.iter().any(|&v| v);
 
-            if ams_trays_dirty || printer_borrow.virty_tray_dirty || printer_borrow.nozzle_diameter_dirty || printer_borrow.ams_exist_bits_dirty || printer_borrow.tray_exist_bits_dirty || printer_borrow.tray_read_done_bits_dirty || printer_borrow.calibrations_dirty {
+            if ams_trays_dirty
+                || printer_borrow.virty_tray_dirty
+                || printer_borrow.nozzle_diameter_dirty
+                || printer_borrow.ams_exist_bits_dirty
+                || printer_borrow.tray_exist_bits_dirty
+                || printer_borrow.tray_read_done_bits_dirty
+                || printer_borrow.calibrations_dirty
+                || printer_borrow.printer_name_dirty
+            {
                 debug!(
-                    "[{}] Dirty status: AMS slots({}), Ext slot({}), Nozzle diameter({}), AmsExists: ({}), Tray Exists: ({}), Try Read Done ({}), Calibrations ({})",
+                    "[{}] Dirty status: AMS slots({}), Ext slot({}), Nozzle diameter({}), AmsExists: ({}), Tray Exists: ({}), Try Read Done ({}), Calibrations ({}), Printer Name ({})",
                     printer_borrow.printer_number, ams_trays_dirty, printer_borrow.virty_tray_dirty, printer_borrow.nozzle_diameter_dirty,
-                    printer_borrow.ams_exist_bits_dirty, printer_borrow.tray_exist_bits_dirty, printer_borrow.tray_read_done_bits_dirty, printer_borrow.calibrations_dirty
+                    printer_borrow.ams_exist_bits_dirty, printer_borrow.tray_exist_bits_dirty, printer_borrow.tray_read_done_bits_dirty, printer_borrow.calibrations_dirty, printer_borrow.printer_name_dirty
                 );
                 printer_serial = Some(printer_borrow.printer_serial.clone());
-                let printer_state = PrinterPersistentState { 
+                let printer_state = PrinterPersistentState {
                     ams_trays: Cow::Borrowed(printer_borrow.ams_trays()),
                     virt_tray: Cow::Borrowed(printer_borrow.virt_tray()),
                     nozzle_diameter: printer_borrow.inner_nozzle_diameter.clone(),
@@ -325,6 +346,7 @@ impl BambuPrinter {
                     tray_exist_bits: printer_borrow.inner_tray_exist_bits,
                     tray_read_done_bits: printer_borrow.inner_tray_read_done_bits,
                     calibrations: Cow::Borrowed(&printer_borrow.calibrations),
+                    printer_name: printer_borrow.inner_printer_name.clone(),
                 };
                 printer_state_str = Some(serde_json::to_string(&printer_state).unwrap());
             }
@@ -346,6 +368,7 @@ impl BambuPrinter {
             printer.borrow_mut().tray_exist_bits_dirty = false;
             printer.borrow_mut().tray_read_done_bits_dirty = false;
             printer.borrow_mut().calibrations_dirty = false;
+            printer.borrow_mut().printer_name_dirty = false;
             let mut file_store = file_store.lock().await;
             match file_store.create_write_file_str(&path, &printer_state_str).await {
                 Ok(_) => {}
@@ -455,7 +478,7 @@ impl BambuPrinter {
             track_print_consume,
             fetch_3mf,
             printer_ip: printer_ip.unwrap_or(Ipv4Address::new(0, 0, 0, 0)),
-            printer_name: printer_name.clone().unwrap_or("Unknown".to_string()),
+            inner_printer_name: printer_name.clone().unwrap_or(default_printer_name()),
             printer_selector_name,
             printer_uuid_to_encode,
             printer_connectivity_ok: None,
@@ -469,6 +492,7 @@ impl BambuPrinter {
             tray_exist_bits_dirty: false,
             tray_read_done_bits_dirty: false,
             calibrations_dirty: false,
+            printer_name_dirty: false,
             calibrations: Vec::new(),
             write_packets,
             observers: Vec::new(),
@@ -565,7 +589,9 @@ impl BambuPrinter {
     fn get_calibration(&self, nozzle_diameter: &str, cali_idx: i32) -> Option<&Calibration> {
         // let nozzle_calibrations = self.calibrations.get(nozzle_diameter)?;
         // let calibration = nozzle_calibrations.get(&cali_idx)?;
-        self.calibrations.iter().find(|cal| cal.diameter == nozzle_diameter && cal.cali_idx == cali_idx)
+        self.calibrations
+            .iter()
+            .find(|cal| cal.diameter == nozzle_diameter && cal.cali_idx == cali_idx)
         // Some(calibration)
     }
 
@@ -734,8 +760,8 @@ impl BambuPrinter {
                     //       and not just assume that nothing changed, an external command could change the color
                     //       it's currently being handled by monitoring those commands and dealing with them as well
                     //       but not sure they are sent when modified via printer console
-                    //       Also - IF outside DEV mode push_all is not accepted, this will be important to speed up 
-                    //       showing AMS colors at least, because at least on P1S it can be very long time until 
+                    //       Also - IF outside DEV mode push_all is not accepted, this will be important to speed up
+                    //       showing AMS colors at least, because at least on P1S it can be very long time until
                     //       printer sends a message that contains the ams_exist_bits and tray_exist_bits
 
                     // In case the tray is empty (so no ready bits), we still want to keep the filamen-info of the tray, but set it as empty
@@ -1007,7 +1033,8 @@ impl BambuPrinter {
         // ignore if filament_id isn't ""
         if let Some(nozzle_diameter) = &print.nozzle_diameter {
             if print.filament_id.as_deref() == Some("") {
-                if let Some(ref filaments) = print.filaments { // filaments is really calibrations
+                if let Some(ref filaments) = print.filaments {
+                    // filaments is really calibrations
                     change_made = true;
                     self.calibrations.retain(|cal| &cal.diameter != nozzle_diameter);
                     for filament in filaments {
@@ -1242,7 +1269,6 @@ impl BambuPrinter {
                     }
                 }
             }
-
 
             // This is taken care of insidte get_updated_tray, but leaving here for now, just in case
             // debug!(">>>>> Checking tray {tray_id} ready state;")
@@ -1749,9 +1775,9 @@ impl BambuPrinter {
         // Now take the calibration of current nozzle from the tray as well
         // This is not encoded to the tag, but rather saved to store, but returned from here as part of the tag
         if let (Some(curr_nozzle_diameter), Some(tray_cali_idx)) = (&self.nozzle_diameter(), tray.cali_idx) {
-                if let Some(calibration) = self.calibrations.iter().find(|cal| cal.cali_idx == tray_cali_idx){
-                    tag_info.calibrations.insert(curr_nozzle_diameter.clone(), calibration.into());
-                }
+            if let Some(calibration) = self.calibrations.iter().find(|cal| cal.cali_idx == tray_cali_idx) {
+                tag_info.calibrations.insert(curr_nozzle_diameter.clone(), calibration.into());
+            }
         }
 
         Ok(tag_info)
@@ -2037,7 +2063,6 @@ impl OldTagCalibration {
     }
 }
 
-
 impl From<&Calibration> for OldTagCalibration {
     fn from(v: &Calibration) -> Self {
         // this "Filament" in bambu_api is really calibrations, bambulab naming ...
@@ -2052,6 +2077,9 @@ impl From<&Calibration> for OldTagCalibration {
     }
 }
 
+fn default_printer_name() -> String {
+    String::from("Unknown")
+}
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PrinterPersistentState<'a> {
     pub ams_trays: Cow<'a, Vec<Tray>>,
@@ -2065,6 +2093,8 @@ pub struct PrinterPersistentState<'a> {
     pub tray_read_done_bits: Option<u32>,
     #[serde(default)]
     pub calibrations: Cow<'a, Vec<Calibration>>,
+    #[serde(default = "default_printer_name")]
+    pub printer_name: String,
 }
 
 fn formatted_k_value(k: &str) -> String {
@@ -2253,10 +2283,7 @@ fn clean_bytes_to_string(input: &[u8]) -> String {
 }
 
 #[embassy_executor::task(pool_size = MAX_NUM_PRINTERS)]
-pub async fn incoming_messages_task(
-    read_packets: Rc<ReadPacketsPubSub>,
-    bambu_printer: Rc<RefCell<BambuPrinter>>,
-) {
+pub async fn incoming_messages_task(read_packets: Rc<ReadPacketsPubSub>, bambu_printer: Rc<RefCell<BambuPrinter>>) {
     let mut subscriber = read_packets.subscriber().unwrap();
     const KEEP_ALIVE_SEC: u32 = 20;
     let printer_log_id = bambu_printer.borrow().printer_number;
@@ -2466,12 +2493,12 @@ pub async fn bambu_mqtt_task(
         }
     } else {
         printer_ip = bambu_printer.borrow().configured_printer_ip.unwrap();
-        printer_name = bambu_printer.borrow().configured_printer_name.clone().unwrap_or(String::from("Unknown"));
+        printer_name = bambu_printer.borrow().configured_printer_name.clone().unwrap_or(default_printer_name());
     }
 
     // Final name, theoretically if name explicitly supplied and IP not,  this could override the supplied name
     bambu_printer.borrow_mut().printer_ip = printer_ip;
-    bambu_printer.borrow_mut().printer_name = printer_name;
+    bambu_printer.borrow_mut().set_printer_name(&printer_name);
 
     let remote_endpoint = (printer_ip, 8883);
     let password = {

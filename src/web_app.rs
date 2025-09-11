@@ -10,7 +10,7 @@ use embedded_sdmmc::asynchronous::LfnBuffer;
 use framework::framework_web_app::{encrypt, encrypt_bytes, FrameworkState};
 use hashbrown::HashMap;
 use picoserve::response::chunked::{ChunkWriter, ChunkedResponse, ChunksWritten};
-use picoserve::response::{Response, StatusCode};
+use picoserve::response::StatusCode;
 use picoserve::routing::{get, get_service};
 use picoserve::{
     extract::{FromRequest, State},
@@ -329,10 +329,10 @@ impl AppWithStateBuilder for NestedAppBuilder {
                         },
                         consumed_since_add: 0.0,
                         consumed_since_weight: 0.0,
-                        ext_has_k: false,
+                        ext_has_k: add_spool.k_info.is_some(),
                     };
                     if new_spool.id.is_empty() {
-                        match store.add_untagged_spool(new_spool).await {
+                        match store.add_untagged_spool(new_spool, add_spool.k_info).await {
                             Ok(new_id) => match store.query_spools() {
                                 Some(csv) => AddSpoolDTOResponse { id: new_id, csv }.encrypt(&key.borrow()),
                                 None => {
@@ -347,7 +347,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
                         }
                     } else {
                         let id = new_spool.id.clone();
-                        match store.edit_spool_from_web(new_spool).await {
+                        match store.edit_spool_from_web(new_spool, add_spool.k_info).await {
                             Ok(_) => match store.query_spools() {
                                 Some(csv) => AddSpoolDTOResponse { id, csv }.encrypt(&key.borrow()),
                                 None => {
@@ -380,7 +380,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
                                 (
                                     printer.borrow().printer_serial.clone(),
                                     PrinterEntry {
-                                        name: printer.borrow().printer_name.clone(),
+                                        name: printer.borrow().printer_name().clone(),
                                         extruders: 1,
                                         pressure_advance: printer
                                             .borrow()
@@ -393,6 +393,8 @@ impl AppWithStateBuilder for NestedAppBuilder {
                                                 nozzle_id: "".to_string(),
                                                 name: pa.name.clone(),
                                                 k_value: pa.k_value.clone(),
+                                                cali_idx: pa.cali_idx,
+                                                setting_id: pa.setting_id.clone(),
                                             })
                                             .collect::<Vec<_>>(),
                                     },
@@ -760,6 +762,7 @@ pub struct AddSpoolDTO {
     pub note: String,
     pub slicer_filament: String,
     pub full_unused: String,
+    pub k_info: Option<KInfo>,
 }
 encrypted_input!(AddSpoolDTO);
 
@@ -794,6 +797,8 @@ pub struct PressureAdvanceEntry {
     pub nozzle_id: String,
     pub name: String,
     pub k_value: String,
+    pub cali_idx: i32,
+    pub setting_id: Option<String>,
 }
 
 //

@@ -268,14 +268,18 @@ impl Store {
         Ok(())
     }
 
-    pub async fn add_untagged_spool(&self, mut spool_record: SpoolRecord) -> Result<String, StoreError> {
+    pub async fn add_untagged_spool(&self, mut spool_record: SpoolRecord, k_info: Option<KInfo>) -> Result<String, StoreError> {
         let new_spool_id = (*self.last_spool_id.borrow()) + 1;
         if let Some(spools_db) = &self.spools_db.get() {
             spool_record.id = new_spool_id.to_string();
             spool_record.added_time = store_safe_time_now();
+            spool_record.ext_has_k = k_info.is_some();
             match spools_db.insert(spool_record).await.context(CsvDbSnafu)? {
                 true => {
                     *self.last_spool_id.borrow_mut() = new_spool_id;
+                    let mut spool_rec_ext = self.get_spool_ext_by_id(&new_spool_id.to_string()).await?;
+                    spool_rec_ext.k_info = k_info;
+                    self.store_spool_rec_ext(&new_spool_id.to_string(), &spool_rec_ext).await?;
                     Ok(new_spool_id.to_string())
                 }
                 false => {
@@ -289,7 +293,7 @@ impl Store {
         }
     }
 
-    pub async fn edit_spool_from_web(&self, spool_record: SpoolRecord) -> Result<(), StoreError> {
+    pub async fn edit_spool_from_web(&self, spool_record: SpoolRecord, k_info: Option<KInfo>) -> Result<(), StoreError> {
         if let Some(spools_db) = &self.spools_db.get() {
             let updated_record = {
                 let spools_db_borrow = spools_db.records.borrow(); // Important: Note this borrow, dropped when context ends, but if changing need to make sure it is dropped
@@ -297,7 +301,7 @@ impl Store {
                     // Taking this approach with extra clones, so if future fields are added, this won't be missed
                     let current_record = &current_record.data;
                     SpoolRecord {
-                        id: spool_record.id,
+                        id: spool_record.id.clone(),
                         tag_id: current_record.tag_id.clone(), // can't change from web
                         material_type: spool_record.material_type,
                         material_subtype: spool_record.material_subtype,
@@ -315,7 +319,7 @@ impl Store {
                         added_full: spool_record.added_full,
                         consumed_since_add: current_record.consumed_since_add,
                         consumed_since_weight: current_record.consumed_since_weight,
-                        ext_has_k: spool_record.ext_has_k,
+                        ext_has_k: k_info.is_some(),
                     }
                 } else {
                     return Err(StoreError::NotFound { id: spool_record.id.clone() });
@@ -323,6 +327,9 @@ impl Store {
             };
 
             spools_db.insert(updated_record).await.context(CsvDbSnafu)?;
+            let mut spool_rec_ext = self.get_spool_ext_by_id(&spool_record.id).await?;
+            spool_rec_ext.k_info = k_info;
+            self.store_spool_rec_ext(&spool_record.id, &spool_rec_ext).await?;
             Ok(())
         } else {
             Err(StoreError::NoCsvDb)

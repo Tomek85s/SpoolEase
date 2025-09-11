@@ -884,7 +884,7 @@ impl ViewModel {
                 &tag_info_to_encode.to_descriptor(None, None)
             } else {
                 &tag_info_to_encode.to_descriptor(
-                    Some(&bambu_printer_borrow.printer_name),
+                    Some(bambu_printer_borrow.printer_name()),
                     Some(&bambu_printer_borrow.printer_uuid_to_encode),
                 )
             };
@@ -1078,7 +1078,7 @@ impl ViewModel {
                             encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name).into();
                             encode_request_display.pa_line1 = format!(
                                 "{}, {}",
-                                bambu_borrow.printer_name,
+                                bambu_borrow.printer_name(),
                                 bambu_borrow.nozzle_diameter().as_ref().unwrap_or(&"?".to_string())
                             )
                             .into();
@@ -1227,7 +1227,7 @@ impl ViewModel {
                 // if there is a line 2 but line 1 was not filled (staging case)
                 encode_request_display.pa_line1 = format!(
                     "{}, {}",
-                    bambu_borrow.printer_name,
+                    bambu_borrow.printer_name(),
                     bambu_borrow.nozzle_diameter().as_ref().unwrap_or(&"Unknown".to_string())
                 )
                 .into();
@@ -1492,7 +1492,7 @@ impl ViewModel {
             if printer_found.is_none() && !tag_with_k.calibrations_printer_name.is_empty() {
                 for printer in &self.bambu_printer_model.printers {
                     let printer_borrow = printer.borrow();
-                    if printer_borrow.printer_name == tag_with_k.calibrations_printer_name {
+                    if *printer_borrow.printer_name() == tag_with_k.calibrations_printer_name {
                         printer_found = Some(printer.clone());
                     }
                 }
