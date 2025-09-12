@@ -88,6 +88,36 @@ pub enum TagOperation {
     UpdateWeight { weight: i32 },
 }
 
+pub enum SpoolRecOp {
+    Noop,
+    FullStore(SpoolRecord),
+    Update (Box<dyn FnOnce(&mut SpoolRecord)>)
+}
+
+impl core::fmt::Debug for SpoolRecOp {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SpoolRecOp::Noop => write!(f, "Noop"),
+            SpoolRecOp::FullStore(record) => f.debug_tuple("FullStore").field(record).finish(),
+            SpoolRecOp::Update(_) => write!(f, "Update(<closure>)"),
+        }
+    }
+}
+
+pub enum SpoolRecExtOp {
+    Noop,
+    Update (Box<dyn FnOnce(&mut SpoolRecordExt)>)
+}
+
+impl core::fmt::Debug for SpoolRecExtOp {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SpoolRecExtOp::Noop => write!(f, "Noop"),
+            SpoolRecExtOp::Update(_) => write!(f, "Update(<closure>)"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum StoreOp {
     WriteTag {
@@ -101,6 +131,12 @@ pub enum StoreOp {
         id: String,
         // if need several use cases, add cookie
     },
+    Write {
+        id: String,
+        spool_rec_op: SpoolRecOp,
+        spool_rec_ext_op: SpoolRecExtOp,
+        cookie: Box<dyn AnyClone>,
+    }
 }
 
 // Cookie - General code
@@ -589,6 +625,40 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
     let receiver = store.requests_channel.receiver();
     loop {
         match receiver.receive().await {
+            StoreOp::Write { id, spool_rec_op, spool_rec_ext_op, cookie } => {
+                if let Some(mut spool_rec) = store.get_spool_by_id(&id) {
+                    match spool_rec_op {
+                        SpoolRecOp::Noop => (),
+                        SpoolRecOp::FullStore(new_spool_record) => {
+                            // TODO: need to deal with notifications back properly, different than today
+                            // match store.update_spool(new_spool_record).await {
+                            //     Ok(_) => {
+                            //         store.notify_tag_stored(Err("Likely Internal Software Error\nWrite to missing spool\nspool id {id}"), cookie);
+                            //     }
+                            //     Err(err) => todo!(),
+                            // }
+                        }
+                        SpoolRecOp::Update(update_fn) => {
+                            // TODO: need to deal with notifications back properly, different than today
+                            //       or maybe switch to tasks instead of notifications and cookies
+                            //       currently assuming here update is a tag update for weight only
+                            update_fn(&mut spool_rec);
+                            match store.update_spool(spool_rec.clone()).await {
+                                Ok(_) => {
+                                    store.notify_tag_stored(Ok(Some((&spool_rec, &SpoolRecordExt::default()))), cookie.clone());
+                                }
+                                Err(err) => {
+                                   store.notify_tag_stored(Err(&format!("Error updating store: {err:?}")), cookie);
+                                }
+                            }
+
+                        }
+                    }
+                } else {
+                    error!("Request for store Write to a missing spool {id}");
+                    store.notify_tag_stored(Err("Likely Internal Software Error\nWrite to missing spool\nspool id {id}"), cookie);
+                }
+            },
             StoreOp::WriteTag {
                 tag_info,
                 k_info,
@@ -887,7 +957,7 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
                     //////////////////////////////////////////////////////////////////////////////////////////
 
                     let spool_rec_ext = SpoolRecordExt {
-                        tag: Some(tag_info.origin_descriptor),
+                        tag: None, // TODO:  IMPORTANT! Solve this issue - was Some(tag_info.origin_descriptor),
                         k_info,
                     };
 
@@ -962,13 +1032,13 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
 }
 
 // TODO: think if to change it to get the spoolRecord from store (and it will hold Rc to store)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FullSpoolRecord {
     pub spool_rec: SpoolRecord,
     pub spool_rec_ext: SpoolRecordExt,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
 pub struct SpoolRecord {
     pub id: String,
     pub tag_id: String,           // 14 (7*2)

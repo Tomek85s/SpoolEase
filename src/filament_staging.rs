@@ -1,15 +1,15 @@
-use alloc::{boxed::Box, rc::Rc};
+use alloc::rc::Rc;
 use framework::error;
 
-use crate::{bambu::TagInformation, store::{FullSpoolRecord, SpoolRecord, SpoolRecordExt, Store}};
+use crate::store::{FullSpoolRecord, SpoolRecord, SpoolRecordExt, Store};
 
 pub struct FilamentStaging {
-    tag_info: Option<TagInformation>,
+    // tag_info: Option<TagInformation>,
     full_spool_rec: Option<FullSpoolRecord>,
     // spool_record: Option<SpoolRecord>,
     // spool_record_ext: Option<SpoolRecordExt>,
     origin: StagingOrigin,
-    store: Rc<Store>
+    _store: Rc<Store>
 }
 
 #[derive(PartialEq)]
@@ -22,22 +22,21 @@ pub enum StagingOrigin {
 
 impl FilamentStaging {
     pub fn new(store: Rc<Store>) -> Self {
-        Self { tag_info: None, full_spool_rec: None, origin: StagingOrigin::Empty, store: store.clone() }
+        Self { full_spool_rec: None, origin: StagingOrigin::Empty, _store: store.clone() }
     }
 
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
-        self.tag_info.is_none()
+        self.full_spool_rec.is_none()
     }
 
     pub fn clear(&mut self) {
-        self.tag_info = None;
         self.full_spool_rec = None;
         self.origin = StagingOrigin::Empty;
     }
-    pub fn tag_info(&self) -> &Option<TagInformation> {
-        &self.tag_info
-    }
+    // pub fn tag_info(&self) -> &Option<TagInformation> {
+    //     &self.tag_info
+    // }
     pub fn full_spool_rec(&self) -> &Option<FullSpoolRecord> {
         &self.full_spool_rec
     }
@@ -54,37 +53,38 @@ impl FilamentStaging {
             error!("Internal Error storing spool_record_ext when full_spool_rec is empty");
         }
     }
-    pub fn set_spool_record(&mut self, spool_rec: SpoolRecord) {
-        if let Some(tag_info) = &mut self.tag_info {
-            tag_info.id = Some(spool_rec.id.clone());
-        }
+    pub fn set_spool_record(&mut self, spool_rec: SpoolRecord, origin: StagingOrigin) {
+        // if let Some(tag_info) = &mut self.tag_info {
+        //     tag_info.id = Some(spool_rec.id.clone());
+        // }
         self.full_spool_rec.get_or_insert_with(|| FullSpoolRecord {
             spool_rec,
             spool_rec_ext: SpoolRecordExt::default()
         });
-    }
-    pub fn _tag_info_mut(&mut self) -> &mut Option<TagInformation> {
-        &mut self.tag_info
-    }
-    pub fn set_tag_info(&mut self, mut tag_info: Box<TagInformation>, origin: StagingOrigin) {
-        // if loaded in scanning scenario or unloading scenario, the store should reflect some of the fields
-        // also store_record is automatically fetched if available
-
-        // TODO: why store record is not fetched in case of encoded?
-        // maybe it's because at that point it is not available yet?
-        // or could it bring previous information of previous spool using that tag?
-
-        if [StagingOrigin::Scanned, StagingOrigin::Unloaded].contains(&origin) {
-            if let Some(tag_id) = &tag_info.tag_id {
-                if let Some(spool_in_store) = self.store.get_spool_by_tag_id(tag_id) {
-                    tag_info.note = Some(spool_in_store.note.clone());
-                    self.set_spool_record(spool_in_store);
-                }
-            }
-        }
-        self.tag_info = Some(*tag_info);
         self.origin = origin;
     }
+    // pub fn _tag_info_mut(&mut self) -> &mut Option<TagInformation> {
+    //     &mut self.tag_info
+    // }
+    // pub fn set_tag_info(&mut self, mut tag_info: Box<TagInformation>, origin: StagingOrigin) {
+    //     // if loaded in scanning scenario or unloading scenario, the store should reflect some of the fields
+    //     // also store_record is automatically fetched if available
+    //
+    //     // TODO: why store record is not fetched in case of encoded?
+    //     // maybe it's because at that point it is not available yet?
+    //     // or could it bring previous information of previous spool using that tag?
+    //
+    //     if [StagingOrigin::Scanned, StagingOrigin::Unloaded].contains(&origin) {
+    //         if let Some(tag_id) = &tag_info.tag_id {
+    //             if let Some(spool_in_store) = self.store.get_spool_by_tag_id(tag_id) {
+    //                 tag_info.note = Some(spool_in_store.note.clone());
+    //                 self.set_spool_record(spool_in_store);
+    //             }
+    //         }
+    //     }
+    //     self.tag_info = Some(*tag_info);
+    //     self.origin = origin;
+    // }
     pub fn origin(&self) -> &StagingOrigin {
         &self.origin
     }

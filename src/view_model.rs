@@ -29,16 +29,17 @@ use framework::{
     terminal::{self, term_mut, TerminalObserver},
 };
 
-use crate::app::{EncodeRequest, FilamentInfoMode};
+use crate::app::EncodeRequest;
 use crate::app_config::{BASE_FILAMENTS, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
 use crate::bambu::bambu_print::{GcodeAnalysis, PrintProject};
-use crate::bambu::{FilamentInfo, KExtruder, KInfo, KNozzleDiameter, KNozzleId, KPrinter, Tray, TrayBits};
+use crate::bambu::{Filament, FilamentInfo, KExtruder, KInfo, KNozzleDiameter, KNozzleId, KPrinter, SpoolId, Tray, TrayBits};
 use crate::color_utils::get_color_name;
-use crate::filament_staging::{self, StagingOrigin};
+use crate::filament_staging::StagingOrigin;
 use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
 use crate::ssdp::{ssdp_task, SSDPPubSubChannel};
 use crate::store::{
-    store_safe_time_now, AnyClone, Cookie, FullSpoolRecord, SpoolRecord, SpoolRecordExt, Store, StoreObserver, StoreOp, TagOperation,
+    store_safe_time_now, AnyClone, Cookie, FullSpoolRecord, SpoolRecExtOp, SpoolRecOp, SpoolRecord, SpoolRecordExt, Store, StoreObserver, StoreOp,
+    TagOperation,
 };
 use crate::web_app::EncodeInfoDTO;
 use crate::{
@@ -71,28 +72,13 @@ pub struct ViewModel {
     spools_cores_weights: HashMap<i32, i32>,
     spools_cores_filter: String,
     pub store: Rc<Store>,
-    encode_from_blank: EncodeEditingArea,
+    encode_editing_area: Option<FullSpoolRecord>, // we use this to be the same as staging structure and simplify things (even though we use only the k_info for now)
     gcode_analysis_request_channel: Rc<GcodeAnalysisRequestChannel>,
     gcode_analysis_notification_channel: Rc<GcodeAnalysisNotificationChannel>,
     gcode_last_job_number: i32,
     gcode_jobs: Vec<GcodeJob>,
     console_available_gcode_tasks: usize,
     ssdp_pub_sub: &'static SSDPPubSubChannel,
-}
-
-#[derive(Debug, Clone, Default)]
-struct EncodeEditingArea {
-    pub tag_info: Option<TagInformation>,
-    pub full_spool_rec: Option<FullSpoolRecord>,
-}
-impl EncodeEditingArea {
-    pub fn _is_empty(&self) -> bool {
-        self.tag_info.is_none()
-    }
-    pub fn clear(&mut self) {
-        self.tag_info = None;
-        self.full_spool_rec = None;
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -167,7 +153,7 @@ impl ViewModel {
             spools_cores_weights,
             spools_cores_filter: String::new(),
             store,
-            encode_from_blank: EncodeEditingArea::default(),
+            encode_editing_area: None,
             gcode_analysis_request_channel,
             gcode_analysis_notification_channel,
             gcode_last_job_number: 0,
@@ -668,7 +654,7 @@ impl ViewModel {
         let mut encode_request = ui_app_state.get_curr_encode_request();
         encode_request.weight_advertised = encode_info.weight_advertised;
         if encode_request.weight_core != encode_info.weight_core {
-            encode_request.color_name = "".to_shared_string()
+            encode_request.core_name = "".to_shared_string()
         }
         encode_request.weight_core = encode_info.weight_core;
         encode_request.brand = encode_info.brand.to_shared_string();
@@ -676,22 +662,11 @@ impl ViewModel {
         encode_request.color_name = encode_info.color_name.to_shared_string();
         encode_request.note = encode_info.note.to_shared_string();
         if encode_request.tray_id == 998 || encode_request.tray_id == 999 {
-            // Allow full editing only for staging and tray, enforced also on client so maybe redundant here
-            let slicer_filament_enriched_info = if !encode_info.slicer_filament.is_empty() {
-                self.get_filament_info(&encode_info.slicer_filament)
-            } else {
-                None
-            };
-            if let Some(tag_info) = self.encode_from_blank.tag_info.as_mut() {
-                if let Some(filament) = tag_info.filament.as_mut() {
-                    filament.tray_type = encode_info.material.clone();
-                    filament.tray_color = encode_info.color_code.clone();
-                    filament.tray_info_idx = encode_info.slicer_filament.clone();
-                    if let Some((_, _, nozzle_temp_low, nozzle_temp_high)) = slicer_filament_enriched_info {
-                        filament.nozzle_temp_min = nozzle_temp_low;
-                        filament.nozzle_temp_max = nozzle_temp_high;
-                    }
-                }
+            if let Some(encode_editing_area) = self.encode_editing_area.as_mut() {
+                let encode_spool_rec = &mut encode_editing_area.spool_rec;
+                encode_spool_rec.material_type = encode_info.material.clone();
+                encode_spool_rec.color_code = encode_info.color_code.clone();
+                encode_spool_rec.slicer_filament = encode_info.slicer_filament.clone();
             }
         }
 
@@ -729,15 +704,17 @@ impl ViewModel {
     }
 
     fn set_staging_to_tray_direct(
-        &mut self,
+        &self,
         filament_staging: &Rc<RefCell<FilamentStaging>>,
         bambu_printer: &mut BambuPrinter,
         ui: &slint::Weak<crate::app::AppWindow>,
         tray_id: i32,
     ) {
         let mut filament_staging = filament_staging.borrow_mut();
-        if let Some(tag_info) = filament_staging.tag_info() {
-            bambu_printer.set_tray_filament(tray_id, tag_info, filament_staging.full_spool_rec());
+        if let Some(full_spool_rec) = filament_staging.full_spool_rec() {
+            let filament_info = self.get_filament_info(&full_spool_rec.spool_rec.slicer_filament);
+            let min_max_temps = filament_info.map(|fi| (fi.2, fi.3));
+            bambu_printer.set_tray_filament(tray_id, full_spool_rec, min_max_temps);
             filament_staging.clear();
             ui.unwrap().global::<crate::app::AppState>().invoke_empty_spool_staging();
             let (ams_id, tray_id) = BambuPrinter::get_ams_and_tray_id(tray_id as usize);
@@ -761,35 +738,34 @@ impl ViewModel {
         ams_id_for_ui as i32
     }
     fn set_staging_to_tray(
+        view_model: &Rc<RefCell<ViewModel>>,
         filament_staging: &Rc<RefCell<FilamentStaging>>,
         bambu_printer: &Rc<RefCell<BambuPrinter>>,
         ui: &slint::Weak<crate::app::AppWindow>,
         tray_id: i32,
     ) {
-        let mut filament_staging = filament_staging.borrow_mut();
-        if let Some(tag_info) = filament_staging.tag_info() {
-            bambu_printer
-                .borrow_mut()
-                .set_tray_filament(tray_id, tag_info, filament_staging.full_spool_rec());
-            filament_staging.clear();
-            ui.unwrap().global::<crate::app::AppState>().invoke_empty_spool_staging();
-            let (ams_id, tray_id) = BambuPrinter::get_ams_and_tray_id(tray_id as usize);
-            let ams_id_for_ui = Self::ams_if_for_ui(ams_id);
-            let tray_id = tray_id as i32;
-
-            let selected_in_ui = ui.unwrap().global::<crate::app::AppState>().get_curr_printer();
-            warn!(
-                "UI Selected Printer: [{}], setting tray of printer: [{}]",
-                selected_in_ui,
-                bambu_printer.borrow().printer_selector_name
-            );
-
-            ui.unwrap().global::<crate::app::AppState>().invoke_tray_update_succeeded(
-                bambu_printer.borrow().printer_selector_name.to_shared_string(),
-                ams_id_for_ui,
-                tray_id,
-            );
-        }
+        view_model
+            .borrow()
+            .set_staging_to_tray_direct(filament_staging, &mut bambu_printer.borrow_mut(), ui, tray_id);
+        // let mut filament_staging = filament_staging.borrow_mut();
+        // if let Some(full_spool_rec) = filament_staging.full_spool_rec() {
+        //     let filament_info = view_model.borrow().get_filament_info(&full_spool_rec.spool_rec.slicer_filament);
+        //     let min_max_temps = filament_info.map(|fi| (fi.2, fi.3));
+        //     bambu_printer
+        //         .borrow_mut()
+        //         .set_tray_filament(tray_id, full_spool_rec, min_max_temps);
+        //     filament_staging.clear();
+        //     ui.unwrap().global::<crate::app::AppState>().invoke_empty_spool_staging();
+        //     let (ams_id, tray_id) = BambuPrinter::get_ams_and_tray_id(tray_id as usize);
+        //     let ams_id_for_ui = Self::ams_if_for_ui(ams_id);
+        //     let tray_id = tray_id as i32;
+        //
+        //     ui.unwrap().global::<crate::app::AppState>().invoke_tray_update_succeeded(
+        //         bambu_printer.borrow().printer_selector_name.to_shared_string(),
+        //         ams_id_for_ui,
+        //         tray_id,
+        //     );
+        // }
     }
 
     pub fn tag_info_to_encode(&self, encode_request: &EncodeRequest) -> Result<TagInformation, String> {
@@ -801,8 +777,17 @@ impl ViewModel {
         };
         let mut tag_info_to_encode = if tray_id == 998 || tray_id == 999 {
             // Encode from blank, manual data only
-            let tag_info = self.encode_from_blank.tag_info.clone();
-            tag_info.unwrap() // when we get here this should always pass
+            //TODO: think if in case somehow slicer_filament is not in the list (can be here?) if to fallback to default slicer filaments based on material type
+            if let Some(encode_editing_area) = &self.encode_editing_area {
+                let min_max_temps = if let Some(filament_info) = self.get_filament_info(&encode_editing_area.spool_rec.slicer_filament) {
+                    (filament_info.2, filament_info.3)
+                } else {
+                    (0, 0)
+                };
+                TagInformation::from(&encode_editing_area.spool_rec, min_max_temps)
+            } else {
+                TagInformation::default()
+            }
         } else {
             match moved_bambu_printer.borrow().get_tag_info_to_encode(tray_id) {
                 Ok(tag_info) => tag_info,
@@ -833,12 +818,13 @@ impl ViewModel {
         // handler for request from UI to move to staging, need to work only on selected printer
         let moved_filament_staging = self.filament_staging.clone();
         let moved_bambu_printer = self.bambu_printer_model.clone();
+        let moved_view_model = self.view_model.clone().unwrap();
         let moved_ui = self.ui_weak.clone();
         self.ui_weak
             .unwrap()
             .global::<crate::app::AppBackend>()
             .on_set_staging_to_tray(move |tray_id: i32| {
-                Self::set_staging_to_tray(&moved_filament_staging, &moved_bambu_printer, &moved_ui, tray_id);
+                Self::set_staging_to_tray(&moved_view_model, &moved_filament_staging, &moved_bambu_printer, &moved_ui, tray_id);
             });
 
         // handler for request from UI to encode a spool, need to work only on selected printer
@@ -946,32 +932,21 @@ impl ViewModel {
                             encode_request.color_name = spool_rec.color_name.to_shared_string();
                             encode_request.note = spool_rec.note.to_shared_string();
 
-                            if encode_request.tray_index == 998 || encode_request.tray_index == 999{
+                            if encode_request.tray_index == 998 || encode_request.tray_index == 999 {
                                 let mut view_model_borrow_mut = moved_view_model.borrow_mut();
                                 if from_blank_request {
                                     let slicer_filament_enriched_info = if !spool_rec.slicer_filament.is_empty() {
                                         // if povided slicer filament setting, then set temps accordingly
                                         view_model_borrow_mut.get_filament_info(&spool_rec.slicer_filament)
-                                    } else { None };
-
-                                    let filament_info = view_model_borrow_mut.encode_from_blank.tag_info.as_mut().unwrap().filament.as_mut().unwrap();
-
-                                    filament_info.tray_type = spool_rec.material_type;
-                                    filament_info.tray_color = spool_rec.color_code;
-                                    filament_info.tray_info_idx = spool_rec.slicer_filament;
-                                    if !filament_info.tray_info_idx.is_empty() {
-                                        if let Some((_, _, nozzle_temp_low, nozzle_temp_high)) = slicer_filament_enriched_info {
-                                            filament_info.nozzle_temp_min = nozzle_temp_low;
-                                            filament_info.nozzle_temp_max = nozzle_temp_high;
-                                        } else {
-                                            error!("Tray_info_idx supplied from inventory without information (something probably changed from encoding to these days in custom filaments config)");
-                                            filament_info.nozzle_temp_min = 0; // Real values will be used when based on tray_type (material) when needed
-                                            filament_info.nozzle_temp_max = 0; // Real values will be used when based on tray_type (material) when needed
-                                        }
                                     } else {
-                                        filament_info.nozzle_temp_min = 0; // Real values will be used when based on tray_type (material) when needed
-                                        filament_info.nozzle_temp_max = 0; // Real values will be used when based on tray_type (material) when needed
-                                    }
+                                        None
+                                    };
+
+                                    let encode_spool_rec = &mut view_model_borrow_mut.encode_editing_area.as_mut().unwrap().spool_rec;
+
+                                    encode_spool_rec.material_type = spool_rec.material_type;
+                                    encode_spool_rec.color_code = spool_rec.color_code;
+                                    encode_spool_rec.slicer_filament = spool_rec.slicer_filament;
                                 }
                             }
                             ui_app_state.set_curr_encode_request(encode_request);
@@ -992,7 +967,7 @@ impl ViewModel {
             .unwrap()
             .global::<crate::app::AppBackend>()
             .on_clear_encode_scratchpad(move || {
-                moved_view_model.borrow_mut().encode_from_blank.clear();
+                moved_view_model.borrow_mut().encode_editing_area = None;
             });
 
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
@@ -1005,12 +980,8 @@ impl ViewModel {
                 // 999 - From data in Staging (when from staging, duplicate the DATA in staging, not use the same ID)
                 // return true if based on an already existing tag
                 //        false if not
-                if tray_id == 999 {
-                    let staging_tag_info = moved_view_model.borrow().filament_staging.borrow().tag_info().clone();
-                    if staging_tag_info.is_some() {
-                        moved_view_model.borrow_mut().encode_from_blank.tag_info = staging_tag_info;
-                        return false; // this is from tag, but we are really just duplicating a tag to a new spool
-                    }
+                if tray_id == 999 && !moved_view_model.borrow().filament_staging.borrow().is_empty() {
+                    moved_view_model.borrow_mut().encode_editing_area = moved_view_model.borrow().filament_staging.borrow().full_spool_rec().clone();
                 }
                 if tray_id == 998 || tray_id == 999 {
                     // 999 if previous if didn't work out
@@ -1018,12 +989,10 @@ impl ViewModel {
                         filament: Some(FilamentInfo::new()),
                         ..Default::default()
                     };
-                    moved_view_model.borrow_mut().encode_from_blank.tag_info = Some(blank_tag_info);
+                    moved_view_model.borrow_mut().encode_editing_area = Some(FullSpoolRecord::default());
                     false
-                } else if tray_id == 254 {
-                    moved_bambu_printer.borrow().virt_tray().meta_info.tag_info.is_some()
                 } else {
-                    moved_bambu_printer.borrow().ams_trays()[tray_id as usize].meta_info.tag_info.is_some()
+                    moved_bambu_printer.borrow().get_any_tray(tray_id as usize).meta_info.spool_id.is_some()
                 }
             });
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
@@ -1038,233 +1007,379 @@ impl ViewModel {
     fn calc_encode_request_display(&self, mode: crate::app::FilamentInfoMode) {
         let moved_ui = self.ui_weak.unwrap();
         let ui_app_state = moved_ui.global::<crate::app::AppState>();
+
         let mut encode_request = ui_app_state.get_curr_encode_request();
         let mut encode_request_display = ui_app_state.get_curr_encode_request_display();
-        encode_request_display.pa_line1 = "".into();
-        encode_request_display.pa_line2 = "".into();
-        let tray_id = encode_request.tray_id;
+        let first_request_to_display = encode_request_display.filament_type.is_empty();
 
+        let tray_id = encode_request.tray_id;
         let staging_borrow = self.filament_staging.borrow();
         let bambu_borrow = self.bambu_printer_model.borrow();
+        let mut tray_full_rec = FullSpoolRecord::default();
 
-        // This is a bit delicate here
-        // To display/encode there are two potential sources of information - the tray information and the tag information.
-        // tray information exists with tray_is is external tray or ams trays
-        // tag information exist when a tray has a tag inside (not always) or in staging
-        // when from blank (998) nothing is available at start but built in encode_from_blank variable
-        // Then, tray takes precedence over tag information
-        // Tag information is used based on if there are differences in tray information and tag information (so for example color name will be used if color codes are the same)
-        // On top of that, there are differences in case of encode and in case of display
-        //  In case of display we show the inventory-id, but in case of encode we don't want to override the inventory-id so it won't show the inventory-id and will be empty
-        //  Later either the user can set an explicit ID to use, or on the tag_id itself when encoded if match will mark off the previous id record and create a new one,
-
-        // Start first with getting the relevant tag information and the filament information
-        let (filament_info, tag_info) = match tray_id {
+        let (display_full_spool_rec, nozzle_temps) = match tray_id {
             -1 => {
                 // Special case to avoid a call after encode_request is cleared
                 return;
             }
-            999 | 998 => {
-                // For staging (999) for View - use the staging data, for encode use blank data (which is copied into when encode starts)
-                let (tag_info_source, full_spool_rec_source) = if tray_id == 999 && mode == FilamentInfoMode::View {
-                    (staging_borrow.tag_info(), staging_borrow.full_spool_rec())
+
+            999 => {
+                // Staging
+                if let Some(full_spool_rec) = staging_borrow.full_spool_rec() {
+                    encode_request_display.pa_line1 = format!("Tag: {}", if full_spool_rec.spool_rec.ext_has_k {"Configured"} else {"Not configured"}).into();
+                    (full_spool_rec, (0, 0))
                 } else {
-                    (&self.encode_from_blank.tag_info, &self.encode_from_blank.full_spool_rec)
-                };
-                if let Some(tag_info) = tag_info_source {
-                    if let Some(filament_info) = &tag_info.filament {
-                        let calibration = self
-                            .bambu_printer_model
-                            .borrow()
-                            .get_matching_printer_calibration_for_current_nozzle(tag_info, full_spool_rec_source);
-                        // if let Some((nozzle_diameter, calibration)) = &tag_info.calibrations.iter().next() {
-                        if let Some(calibration) = calibration {
-                            encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name).into();
-                            encode_request_display.pa_line1 = format!(
-                                "{}, {}",
-                                bambu_borrow.printer_name(),
-                                bambu_borrow.nozzle_diameter().as_ref().unwrap_or(&"?".to_string())
-                            )
-                            .into();
-                        } else if self
-                            .encode_from_blank
-                            .full_spool_rec
-                            .as_ref()
-                            .map(|f| f.spool_rec_ext.k_info.is_some())
-                            .is_some()
-                        {
-                            encode_request_display.pa_line1 = "Set".into();
-                            encode_request_display.pa_line1 = "Not for this printer/nozzle".into();
-                            // TODO: For H2D will need to do something smarter than this, show two extruders
-                        }
-                        // }
-                        (Some(filament_info.clone()), staging_borrow.tag_info())
-                    } else {
-                        (None, &None)
+                    return;
+                }
+            }
+
+            0..23 | 254 => {
+                let tray = bambu_borrow.get_any_tray(tray_id as usize);
+                let tray_spool_rec = &mut tray_full_rec.spool_rec;
+                // first get info from spool_rec as a starting point if exist
+                if let Some(spool_id) = &tray.meta_info.spool_id {
+                    if let Some(spool_rec) = self.store.get_spool_by_id(spool_id) {
+                        *tray_spool_rec = spool_rec.clone();
                     }
-                } else {
-                    (None, &None)
                 }
-            }
-            254 => {
-                // External Tray
-                let tray = &bambu_borrow.virt_tray();
-                // Show the calibration of the slot, not the Tag
-                if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
-                    encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
+                let mut nozzle_temps = (0, 0);
+                if let Filament::Known(filament) = &tray.filament {
+                    let slicer_filament_changed = tray_spool_rec.slicer_filament != filament.tray_info_idx;
+                    let material_type_changed = tray_spool_rec.material_type != filament.tray_type;
+                    let color_code_changed = tray_spool_rec.color_code != filament.tray_color;
+
+                    tray_spool_rec.slicer_filament = filament.tray_info_idx.clone();
+                    tray_spool_rec.material_type = filament.tray_type.clone();
+                    tray_spool_rec.color_code = filament.tray_color.clone();
+
+                    if color_code_changed {
+                        tray_spool_rec.color_name = String::new(); // will later fill from code
+                    }
+                    if slicer_filament_changed || material_type_changed {
+                        tray_spool_rec.brand = String::new(); // will later fill from slicer filament
+                        tray_spool_rec.material_subtype = String::new();
+                    }
+
+                    nozzle_temps = (filament.nozzle_temp_min, filament.nozzle_temp_max);
+                    
+                    if let Some(tray_calibration) = bambu_borrow.get_tray_calibration(tray) {
+                        encode_request_display.pa_line1 = format!("Tray: {}, {}", tray_calibration.k_value, tray_calibration.name).into();
+                    }
+                    if tray.meta_info.spool_id.is_some() {
+                        encode_request_display.pa_line2 = format!("Tag: {}", if tray_spool_rec.ext_has_k {"Configured"} else {"Not configured"}).into();
+                    }
                 }
-                if let bambu::Filament::Known(filament_info) = &tray.filament {
-                    (Some(filament_info.clone()), &tray.meta_info.tag_info)
-                } else {
-                    (None, &None)
-                }
-            }
-            0..23 => {
-                // Standard trays
-                // let bambu = moved_bambu.borrow();
-                let tray = &bambu_borrow.ams_trays()[tray_id as usize];
-                // Show the calibration of the slot, not the Tag
-                if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
-                    encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
-                }
-                if let bambu::Filament::Known(filament_info) = &tray.filament {
-                    (Some(filament_info.clone()), &tray.meta_info.tag_info)
-                } else {
-                    (None, &None)
-                }
+
+                // deal with case things changed from tag
+
+                (&tray_full_rec, nozzle_temps)
             }
             _ => {
                 error!("UI request to update display for tray out of range, software error or printer issue");
-                (None, &None)
+                return;
             }
         };
 
-        if let Some(tag_info) = tag_info {
-            if let Some(id) = &tag_info.id {
-                encode_request.id = id.to_shared_string();
-            }
-        }
+        let display_spool_rec = &display_full_spool_rec.spool_rec;
 
-        // Case when id was selected (differently) from UI
-        // In such case need to fetch from store the data and fill it in
+        let filament_info = self.get_filament_info(&display_spool_rec.slicer_filament);
 
-        let first_request_to_display = encode_request_display.filament_type.is_empty();
-
-        if let Some(filament_info) = filament_info {
-            if first_request_to_display {
-                // checking tray_type is empty to know if it is the first time, later if user changes to empty some value it shouldn't be overriden
-                if let Some(tag_info) = tag_info {
-                    let mut material_changed_from_tag = false;
-                    let mut color_code_changed_from_tag = false;
-                    if let Some(tag_filament_info) = &tag_info.filament {
-                        if tag_filament_info.tray_color != filament_info.tray_color {
-                            color_code_changed_from_tag = true;
-                        }
-                        if tag_filament_info.tray_type != filament_info.tray_type || tag_filament_info.tray_info_idx != filament_info.tray_info_idx {
-                            material_changed_from_tag = true;
-                        }
-                    }
-                    // if tray filament type didn't change from the tag, then we can use the brand, subtype,
-                    if !material_changed_from_tag {
-                        if encode_request.brand.is_empty() && tag_info.brand.is_some() {
-                            encode_request.brand = tag_info.brand.as_ref().unwrap().to_shared_string();
-                        }
-                        if encode_request.filament_subtype.is_empty() && tag_info.filament_subtype.is_some() {
-                            encode_request.filament_subtype = tag_info.filament_subtype.as_ref().unwrap().to_shared_string();
-                        }
-                    }
-
-                    // if tray filament color code didn't change from tag we can use tag color name, otherwise we calculate name again
-                    #[allow(clippy::collapsible_if)]
-                    if !color_code_changed_from_tag {
-                        if encode_request.color_name.is_empty() && tag_info.color_name.is_some() {
-                            encode_request.color_name = tag_info.color_name.as_ref().unwrap().to_shared_string();
-                        }
-                    }
-                    // If there is tag_info,  there is always also filament_info so can do it here instead of a separate tag_info unwrapping outside the if filament_info
-                    if encode_request.note.is_empty() && tag_info.note.is_some() {
-                        encode_request.note = tag_info.note.as_ref().unwrap().to_shared_string();
-                    }
-                    if encode_request.weight_advertised == 0 && tag_info.weight_advertised.is_some() {
-                        encode_request.weight_advertised = tag_info.weight_advertised.unwrap();
-                    }
-                    if encode_request.weight_core == 0 && tag_info.weight_core.is_some() {
-                        encode_request.weight_core = tag_info.weight_core.unwrap();
-                    }
-                    // in case of encode we don't copy weight_new
-                    #[allow(clippy::collapsible_if)]
-                    if mode == FilamentInfoMode::View {
-                        if encode_request.weight_new == 0 && tag_info.weight_new.is_some() {
-                            encode_request.weight_new = tag_info.weight_new.unwrap();
-                        }
-                    }
+        encode_request.brand = if display_spool_rec.brand.is_empty() {
+            if let Some((_, slicer_name, _, _)) = &filament_info {
+                if let Some(brand_name) = get_brand_from_text(slicer_name) {
+                    brand_name.into()
+                } else {
+                    "".into()
                 }
-
-                if encode_request.color_name.is_empty() && filament_info.tray_color.len() >= 6 {
-                    let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
-                    let color = slint::Color::from_argb_encoded(color);
-                    let color_name_info = get_color_name(color.red(), color.green(), color.blue());
-                    encode_request.color_name = color_name_info.0.to_shared_string();
-                    if mode == crate::app::FilamentInfoMode::View {
-                        encode_request.color_name = format!("({})", encode_request.color_name).to_shared_string();
-                    }
-                }
-            }
-
-            encode_request_display.color_code = filament_info.tray_color[..filament_info.tray_color.len().min(8)].into();
-            if filament_info.tray_color.len() >= 6 {
-                let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
-                encode_request_display.title_color = slint::Color::from_argb_encoded(color);
-            }
-            encode_request_display.temp_min = filament_info.nozzle_temp_min.try_into().unwrap_or_default();
-            encode_request_display.temp_max = filament_info.nozzle_temp_max.try_into().unwrap_or_default();
-            encode_request_display.filament_type = filament_info.tray_type.into();
-            // TODO: Add support for custom filaments here
-
-            if let Some((base, slicer_name, _, _)) = self.get_filament_info(&filament_info.tray_info_idx) {
-                encode_request_display.slicer_name = format!("{slicer_name} ({})", if base { "Base" } else { "Custom" }).into();
             } else {
-                encode_request_display.slicer_name = "Unknown Filament".into();
+                "".into()
             }
+        } else {
+            display_spool_rec.brand.to_shared_string()
+        };
 
-            if encode_request_display.pa_line1.is_empty() && !encode_request_display.pa_line2.is_empty() {
-                // if there is a line 2 but line 1 was not filled (staging case)
-                encode_request_display.pa_line1 = format!(
-                    "{}, {}",
-                    bambu_borrow.printer_name(),
-                    bambu_borrow.nozzle_diameter().as_ref().unwrap_or(&"Unknown".to_string())
-                )
-                .into();
+        encode_request.color_name = if display_spool_rec.color_name.is_empty() {
+            if display_spool_rec.color_code.len() >= 6 {
+                let color = u32::from_str_radix(&display_spool_rec.color_code[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+                let color = slint::Color::from_argb_encoded(color);
+                let color_name_info = get_color_name(color.red(), color.green(), color.blue());
+                let color_name = color_name_info.0.to_shared_string();
+                format!("({})", color_name).into()
+            } else {
+                "".into()
             }
+        } else {
+            display_spool_rec.color_name.to_shared_string()
+        };
 
-            if first_request_to_display && encode_request.brand.is_empty() {
-                if let Some(brand_name) = get_brand_from_text(encode_request_display.pa_line2.as_str()) {
-                    encode_request.brand = brand_name.to_shared_string();
-                } else if let Some(brand_name) = get_brand_from_text(encode_request_display.slicer_name.as_str()) {
-                    encode_request.brand = brand_name.to_shared_string();
-                }
-                if !encode_request.brand.is_empty() && mode == crate::app::FilamentInfoMode::View {
-                    encode_request.brand = format!("({})", encode_request.brand).to_shared_string();
-                }
-            }
+        encode_request.filament_subtype = display_spool_rec.material_subtype.to_shared_string();
 
-            ui_app_state.set_curr_encode_request_display(encode_request_display);
-            if first_request_to_display {
-                ui_app_state.set_curr_encode_request(encode_request);
-            }
+        encode_request.id = display_spool_rec.id.to_shared_string();
+
+        encode_request.note = display_spool_rec.note.to_shared_string();
+
+        encode_request.weight_advertised = *display_spool_rec.weight_advertised.as_ref().unwrap_or(&0);
+        encode_request.weight_core = *display_spool_rec.weight_core.as_ref().unwrap_or(&0);
+        encode_request.weight_new = *display_spool_rec.weight_new.as_ref().unwrap_or(&0);
+
+        encode_request_display.color_code = display_spool_rec.color_code.to_shared_string();
+        encode_request_display.filament_type = display_spool_rec.material_type.to_shared_string();
+
+        encode_request_display.slicer_name = if let Some((base, slicer_name, _, _)) = &filament_info {
+            format!("{slicer_name} ({})", if *base { "Base" } else { "Custom" }).into()
+        } else {
+            "Unknown Filament".into()
+        };
+        encode_request_display.temp_min = nozzle_temps.0 as i32;
+        encode_request_display.temp_max = nozzle_temps.1 as i32;
+
+        encode_request_display.title_color = if display_spool_rec.color_code.len() >= 6 {
+            let color = u32::from_str_radix(&display_spool_rec.color_code[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+            slint::Color::from_argb_encoded(color)
+        } else {
+            encode_request_display.title_color
+        };
+
+        ui_app_state.set_curr_encode_request_display(encode_request_display);
+        if first_request_to_display {
+            ui_app_state.set_curr_encode_request(encode_request);
         }
     }
+
+    // fn old_calc_encode_request_display(&self, mode: crate::app::FilamentInfoMode) {
+    //     let moved_ui = self.ui_weak.unwrap();
+    //     let ui_app_state = moved_ui.global::<crate::app::AppState>();
+    //     let mut encode_request = ui_app_state.get_curr_encode_request();
+    //     let mut encode_request_display = ui_app_state.get_curr_encode_request_display();
+    //     encode_request_display.pa_line1 = "".into();
+    //     encode_request_display.pa_line2 = "".into();
+    //     let tray_id = encode_request.tray_id;
+    //
+    //     let staging_borrow = self.filament_staging.borrow();
+    //     let bambu_borrow = self.bambu_printer_model.borrow();
+    //
+    //     // This is a bit delicate here
+    //     // To display/encode there are two potential sources of information - the tray information and the tag information.
+    //     // tray information exists with tray_is is external tray or ams trays
+    //     // tag information exist when a tray has a tag inside (not always) or in staging
+    //     // when from blank (998) nothing is available at start but built in encode_from_blank variable
+    //     // Then, tray takes precedence over tag information
+    //     // Tag information is used based on if there are differences in tray information and tag information (so for example color name will be used if color codes are the same)
+    //     // On top of that, there are differences in case of encode and in case of display
+    //     //  In case of display we show the inventory-id, but in case of encode we don't want to override the inventory-id so it won't show the inventory-id and will be empty
+    //     //  Later either the user can set an explicit ID to use, or on the tag_id itself when encoded if match will mark off the previous id record and create a new one,
+    //
+    //     // Start first with getting the relevant tag information and the filament information
+    //     let (filament_info, spool_id) = match tray_id {
+    //         -1 => {
+    //             // Special case to avoid a call after encode_request is cleared
+    //             return;
+    //         }
+    //         999 | 998 => {
+    //             // For staging (999) for View - use the staging data, for encode use blank data (which is copied into when encode starts)
+    //             let full_spool_rec_source = if tray_id == 999 && mode == FilamentInfoMode::View {
+    //                 staging_borrow.full_spool_rec()
+    //             } else {
+    //                 &self.encode_editing_area
+    //             };
+    //             if let Some(tag_info) = tag_info_source {
+    //                 if let Some(filament_info) = &tag_info.filament {
+    //                     let calibration = self
+    //                         .bambu_printer_model
+    //                         .borrow()
+    //                         .get_matching_printer_calibration_for_current_nozzle(tag_info, full_spool_rec_source);
+    //                     // if let Some((nozzle_diameter, calibration)) = &tag_info.calibrations.iter().next() {
+    //                     if let Some(calibration) = calibration {
+    //                         encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name).into();
+    //                         encode_request_display.pa_line1 = format!(
+    //                             "{}, {}",
+    //                             bambu_borrow.printer_name(),
+    //                             bambu_borrow.nozzle_diameter().as_ref().unwrap_or(&"?".to_string())
+    //                         )
+    //                         .into();
+    //                     } else if self
+    //                         .encode_editing_area
+    //                         .full_spool_rec
+    //                         .as_ref()
+    //                         .map(|f| f.spool_rec_ext.k_info.is_some())
+    //                         .is_some()
+    //                     {
+    //                         encode_request_display.pa_line1 = "Set".into();
+    //                         encode_request_display.pa_line1 = "Not for this printer/nozzle".into();
+    //                         // TODO: For H2D will need to do something smarter than this, show two extruders
+    //                     }
+    //                     // }
+    //                     (Some(filament_info.clone()), staging_borrow.tag_info())
+    //                 } else {
+    //                     (None, &None)
+    //                 }
+    //             } else {
+    //                 (None, &None)
+    //             }
+    //         }
+    //         254 => {
+    //             // External Tray
+    //             let tray = &bambu_borrow.virt_tray();
+    //             // Show the calibration of the slot, not the Tag
+    //             if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
+    //                 encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
+    //             }
+    //             if let bambu::Filament::Known(filament_info) = &tray.filament {
+    //                 (Some(filament_info.clone()), &tray.meta_info.tag_info)
+    //             } else {
+    //                 (None, &None)
+    //             }
+    //         }
+    //         0..23 => {
+    //             // Standard trays
+    //             // let bambu = moved_bambu.borrow();
+    //             let tray = &bambu_borrow.ams_trays()[tray_id as usize];
+    //             // Show the calibration of the slot, not the Tag
+    //             if let Some(calibration) = bambu_borrow.get_tray_calibration(tray) {
+    //                 encode_request_display.pa_line2 = format!("{}, {}", calibration.k_value, calibration.name,).into();
+    //             }
+    //             if let bambu::Filament::Known(filament_info) = &tray.filament {
+    //                 (Some(filament_info.clone()), &tray.meta_info.tag_info)
+    //             } else {
+    //                 (None, &None)
+    //             }
+    //         }
+    //         _ => {
+    //             error!("UI request to update display for tray out of range, software error or printer issue");
+    //             (None, &None)
+    //         }
+    //     };
+    //
+    //     if let Some(tag_info) = tag_info {
+    //         if let Some(id) = &tag_info.id {
+    //             encode_request.id = id.to_shared_string();
+    //         }
+    //     }
+    //
+    //     // Case when id was selected (differently) from UI
+    //     // In such case need to fetch from store the data and fill it in
+    //
+    //     let first_request_to_display = encode_request_display.filament_type.is_empty();
+    //
+    //     if let Some(filament_info) = filament_info {
+    //         if first_request_to_display {
+    //             // checking tray_type is empty to know if it is the first time, later if user changes to empty some value it shouldn't be overriden
+    //             if let Some(tag_info) = tag_info {
+    //                 let mut material_changed_from_tag = false;
+    //                 let mut color_code_changed_from_tag = false;
+    //                 if let Some(tag_filament_info) = &tag_info.filament {
+    //                     if tag_filament_info.tray_color != filament_info.tray_color {
+    //                         color_code_changed_from_tag = true;
+    //                     }
+    //                     if tag_filament_info.tray_type != filament_info.tray_type || tag_filament_info.tray_info_idx != filament_info.tray_info_idx {
+    //                         material_changed_from_tag = true;
+    //                     }
+    //                 }
+    //                 // if tray filament type didn't change from the tag, then we can use the brand, subtype,
+    //                 if !material_changed_from_tag {
+    //                     if encode_request.brand.is_empty() && tag_info.brand.is_some() {
+    //                         encode_request.brand = tag_info.brand.as_ref().unwrap().to_shared_string();
+    //                     }
+    //                     if encode_request.filament_subtype.is_empty() && tag_info.filament_subtype.is_some() {
+    //                         encode_request.filament_subtype = tag_info.filament_subtype.as_ref().unwrap().to_shared_string();
+    //                     }
+    //                 }
+    //
+    //                 // if tray filament color code didn't change from tag we can use tag color name, otherwise we calculate name again
+    //                 #[allow(clippy::collapsible_if)]
+    //                 if !color_code_changed_from_tag {
+    //                     if encode_request.color_name.is_empty() && tag_info.color_name.is_some() {
+    //                         encode_request.color_name = tag_info.color_name.as_ref().unwrap().to_shared_string();
+    //                     }
+    //                 }
+    //                 // If there is tag_info,  there is always also filament_info so can do it here instead of a separate tag_info unwrapping outside the if filament_info
+    //                 if encode_request.note.is_empty() && tag_info.note.is_some() {
+    //                     encode_request.note = tag_info.note.as_ref().unwrap().to_shared_string();
+    //                 }
+    //                 if encode_request.weight_advertised == 0 && tag_info.weight_advertised.is_some() {
+    //                     encode_request.weight_advertised = tag_info.weight_advertised.unwrap();
+    //                 }
+    //                 if encode_request.weight_core == 0 && tag_info.weight_core.is_some() {
+    //                     encode_request.weight_core = tag_info.weight_core.unwrap();
+    //                 }
+    //                 // in case of encode we don't copy weight_new
+    //                 #[allow(clippy::collapsible_if)]
+    //                 if mode == FilamentInfoMode::View {
+    //                     if encode_request.weight_new == 0 && tag_info.weight_new.is_some() {
+    //                         encode_request.weight_new = tag_info.weight_new.unwrap();
+    //                     }
+    //                 }
+    //             }
+    //
+    //             if encode_request.color_name.is_empty() && filament_info.tray_color.len() >= 6 {
+    //                 let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+    //                 let color = slint::Color::from_argb_encoded(color);
+    //                 let color_name_info = get_color_name(color.red(), color.green(), color.blue());
+    //                 encode_request.color_name = color_name_info.0.to_shared_string();
+    //                 if mode == crate::app::FilamentInfoMode::View {
+    //                     encode_request.color_name = format!("({})", encode_request.color_name).to_shared_string();
+    //                 }
+    //             }
+    //         }
+    //
+    //         encode_request_display.color_code = filament_info.tray_color[..filament_info.tray_color.len().min(8)].into();
+    //         if filament_info.tray_color.len() >= 6 {
+    //             let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+    //             encode_request_display.title_color = slint::Color::from_argb_encoded(color);
+    //         }
+    //         encode_request_display.temp_min = filament_info.nozzle_temp_min.try_into().unwrap_or_default();
+    //         encode_request_display.temp_max = filament_info.nozzle_temp_max.try_into().unwrap_or_default();
+    //         encode_request_display.filament_type = filament_info.tray_type.into();
+    //         // TODO: Add support for custom filaments here
+    //
+    //         if let Some((base, slicer_name, _, _)) = self.get_filament_info(&filament_info.tray_info_idx) {
+    //             encode_request_display.slicer_name = format!("{slicer_name} ({})", if base { "Base" } else { "Custom" }).into();
+    //         } else {
+    //             encode_request_display.slicer_name = "Unknown Filament".into();
+    //         }
+    //
+    //         if encode_request_display.pa_line1.is_empty() && !encode_request_display.pa_line2.is_empty() {
+    //             // if there is a line 2 but line 1 was not filled (staging case)
+    //             encode_request_display.pa_line1 = format!(
+    //                 "{}, {}",
+    //                 bambu_borrow.printer_name(),
+    //                 bambu_borrow.nozzle_diameter().as_ref().unwrap_or(&"Unknown".to_string())
+    //             )
+    //             .into();
+    //         }
+    //
+    //         if first_request_to_display && encode_request.brand.is_empty() {
+    //             if let Some(brand_name) = get_brand_from_text(encode_request_display.pa_line2.as_str()) {
+    //                 encode_request.brand = brand_name.to_shared_string();
+    //             } else if let Some(brand_name) = get_brand_from_text(encode_request_display.slicer_name.as_str()) {
+    //                 encode_request.brand = brand_name.to_shared_string();
+    //             }
+    //             if !encode_request.brand.is_empty() && mode == crate::app::FilamentInfoMode::View {
+    //                 encode_request.brand = format!("({})", encode_request.brand).to_shared_string();
+    //             }
+    //         }
+    //
+    //         ui_app_state.set_curr_encode_request_display(encode_request_display);
+    //         if first_request_to_display {
+    //             ui_app_state.set_curr_encode_request(encode_request);
+    //         }
+    //     }
+    // }
 
     fn tag_info_to_ui_spool_info_direct(
         &self,
         bambu_printer_borrow: &BambuPrinter,
-        tag_info: &TagInformation,
         full_spool_rec: &Option<FullSpoolRecord>,
     ) -> Option<crate::app::UiSpoolInfo> {
-        tag_info.filament.as_ref()?; // returns None if tag_info.filament is None
-        let filament_info = tag_info.filament.as_ref().unwrap();
+        let full_spool_rec = full_spool_rec.as_ref()?;
+        let spool_rec = &full_spool_rec.spool_rec;
 
-        let color = u32::from_str_radix(&filament_info.tray_color[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+        let color = if full_spool_rec.spool_rec.color_code.len() >= 6 {
+            u32::from_str_radix(&spool_rec.color_code[..6], 16).unwrap() + 0xFF000000
+        // the plus 0xFF at the end is fo add alpha
+        } else {
+            0x00FFFFFF
+        };
 
         // let mut final_k = bambu_printer_borrow.get_tag_k_for_current_nozzle(tag_info);
         // if let Some(calibration) = tag_info
@@ -1277,18 +1392,18 @@ impl ViewModel {
         //     }
         // }
         let mut ui_spool_info = crate::app::UiSpoolInfo {
-            id: tag_info.id.clone().unwrap_or_default().to_shared_string(),
+            id: spool_rec.id.clone().to_shared_string(),
             color: slint::Color::from_argb_encoded(color),
             // k: SharedString::from(final_k),
             k: SharedString::new(),
-            material: filament_info.tray_type.to_shared_string(),
-            weight_core: tag_info.weight_core.unwrap_or_default(),
+            material: spool_rec.material_type.to_shared_string(),
+            weight_core: spool_rec.weight_core.unwrap_or_default(),
         };
 
-        let calibration = bambu_printer_borrow.get_matching_printer_calibration_for_current_nozzle(tag_info, full_spool_rec);
+        let calibration = bambu_printer_borrow.get_matching_printer_calibration_for_current_nozzle(full_spool_rec);
         if let Some(calibration) = calibration {
             ui_spool_info.k = calibration.k_value.into();
-        } else if full_spool_rec.as_ref().map(|f| f.spool_rec_ext.k_info.is_some()).unwrap_or(false) {
+        } else if full_spool_rec.spool_rec_ext.k_info.is_some() {
             ui_spool_info.k = "NoMatch".into()
         } else {
             ui_spool_info.k = "N/A".into();
@@ -1297,10 +1412,10 @@ impl ViewModel {
         Some(ui_spool_info)
     }
 
-    fn _tag_info_to_ui_spool_info(&self, tag_info: &TagInformation, full_spool_rec: &Option<FullSpoolRecord>) -> Option<crate::app::UiSpoolInfo> {
-        let bambu_printer_borrow = self.bambu_printer_model.borrow();
-        self.tag_info_to_ui_spool_info_direct(&bambu_printer_borrow, tag_info, full_spool_rec)
-    }
+    // fn _tag_info_to_ui_spool_info(&self, tag_info: &TagInformation, full_spool_rec: &Option<FullSpoolRecord>) -> Option<crate::app::UiSpoolInfo> {
+    //     let bambu_printer_borrow = self.bambu_printer_model.borrow();
+    //     self.tag_info_to_ui_spool_info_direct(&bambu_printer_borrow, tag_info, full_spool_rec)
+    // }
 
     fn update_ui_from_printer(&self, bambu_printer: &BambuPrinter) {
         // note - accepting bambu_printer rather than taking from self, because it may be called during callback on_trays_update,
@@ -1350,11 +1465,9 @@ impl ViewModel {
             } else {
                 ui_tray.filament.state = crate::app::UiFilamentState::Unknown;
             }
-            if let Some(tag_info) = &curr_tray.meta_info.tag_info {
+            if let Some(spool_id) = &curr_tray.meta_info.spool_id {
                 ui_tray.tagged = true;
-                if let Some(id) = &tag_info.id {
-                    ui_tray.spool_rec_id = id.into();
-                }
+                ui_tray.spool_rec_id = spool_id.into();
             } else {
                 ui_tray.tagged = false;
                 ui_tray.spool_rec_id = SharedString::new();
@@ -1374,26 +1487,24 @@ impl ViewModel {
         if tray.meta_info.consumed_since_load != 0.0 {
             res = slint::format!("-{:.1}g", tray.meta_info.consumed_since_load);
         }
-        if let Some(tag_info) = &tray.meta_info.tag_info {
-            if let Some(id) = &tag_info.id {
-                if let Some(spool) = self.store.get_spool_by_id(id) {
-                    if let (Some(weight_core), Some(weight_current)) = (spool.weight_core, spool.weight_current) {
-                        let realtime_weight = (weight_current - weight_core) as f32 - tray.meta_info.consumed_since_weight;
-                        res = slint::format!("{:.1}g", realtime_weight);
-                    } else if let (Some(weight_current), Some(weight_new), Some(weight_advertised)) =
-                        (spool.weight_current, spool.weight_new, spool.weight_advertised)
-                    {
-                        let realtime_weight = (weight_current - (weight_new - weight_advertised)) as f32 - tray.meta_info.consumed_since_weight;
-                        res = slint::format!("{:.1}g", realtime_weight);
-                    }
-
-                    // weight_left:
-                    //   weight_current && weight_core
-                    //     ? weight_current - weight_core
-                    //     : weight_current && weight_advertised && weight_new
-                    //       ? weight_current - (weight_new - weight_advertised)
-                    //       : null,
+        if let Some(spool_id) = &tray.meta_info.spool_id {
+            if let Some(spool) = self.store.get_spool_by_id(spool_id) {
+                if let (Some(weight_core), Some(weight_current)) = (spool.weight_core, spool.weight_current) {
+                    let realtime_weight = (weight_current - weight_core) as f32 - tray.meta_info.consumed_since_weight;
+                    res = slint::format!("{:.1}g", realtime_weight);
+                } else if let (Some(weight_current), Some(weight_new), Some(weight_advertised)) =
+                    (spool.weight_current, spool.weight_new, spool.weight_advertised)
+                {
+                    let realtime_weight = (weight_current - (weight_new - weight_advertised)) as f32 - tray.meta_info.consumed_since_weight;
+                    res = slint::format!("{:.1}g", realtime_weight);
                 }
+
+                // weight_left:
+                //   weight_current && weight_core
+                //     ? weight_current - weight_core
+                //     : weight_current && weight_advertised && weight_new
+                //       ? weight_current - (weight_new - weight_advertised)
+                //       : null,
             }
         }
         res
@@ -1556,39 +1667,35 @@ impl ViewModel {
 
     fn display_filament_staging_direct(&self, bambu_printer_borrow: &BambuPrinter) {
         let filament_staging_borrow = self.filament_staging.borrow();
-        if let Some(tag_info) = filament_staging_borrow.tag_info() {
-            if let Some(ui_spool_info) =
-                self.tag_info_to_ui_spool_info_direct(bambu_printer_borrow, tag_info, filament_staging_borrow.full_spool_rec())
-            {
-                // // went into the prior fn call
-                // let calibration =
-                //     bambu_printer_borrow.get_matching_printer_calibration_for_current_nozzle(tag_info, filament_staging_borrow.full_spool_rec());
-                // if let Some(calibration) = calibration {
-                //     ui_spool_info.k = calibration.k_value.into();
-                // } else if filament_staging_borrow
-                //     .spool_rec_ext()
-                //     .as_ref()
-                //     .and_then(|ext| ext.k_info.as_ref())
-                //     .is_some()
-                // {
-                //     ui_spool_info.k = "NoMatch".into()
-                // } else {
-                //     ui_spool_info.k = "N/A".into();
-                // }
-                let ui = self.ui_weak.clone();
-                if *filament_staging_borrow.origin() == StagingOrigin::Scanned {
-                    ui.unwrap().global::<crate::app::AppState>().invoke_read_tag_succeeded(ui_spool_info);
-                } else if *filament_staging_borrow.origin() == StagingOrigin::Encoded {
-                    ui.unwrap()
-                        .global::<crate::app::AppState>()
-                        .invoke_update_spool_staging(ui_spool_info.clone(), crate::app::SpoolStagingState::Encoded);
-                } else if *filament_staging_borrow.origin() == StagingOrigin::Unloaded {
-                    ui.unwrap().global::<crate::app::AppState>().invoke_tag_unloaded(ui_spool_info);
-                } else {
-                    ui.unwrap()
-                        .global::<crate::app::AppState>()
-                        .invoke_update_spool_staging(ui_spool_info.clone(), crate::app::SpoolStagingState::Unchanged);
-                }
+        if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info_direct(bambu_printer_borrow, filament_staging_borrow.full_spool_rec()) {
+            // // went into the prior fn call
+            // let calibration =
+            //     bambu_printer_borrow.get_matching_printer_calibration_for_current_nozzle(tag_info, filament_staging_borrow.full_spool_rec());
+            // if let Some(calibration) = calibration {
+            //     ui_spool_info.k = calibration.k_value.into();
+            // } else if filament_staging_borrow
+            //     .spool_rec_ext()
+            //     .as_ref()
+            //     .and_then(|ext| ext.k_info.as_ref())
+            //     .is_some()
+            // {
+            //     ui_spool_info.k = "NoMatch".into()
+            // } else {
+            //     ui_spool_info.k = "N/A".into();
+            // }
+            let ui = self.ui_weak.clone();
+            if *filament_staging_borrow.origin() == StagingOrigin::Scanned {
+                ui.unwrap().global::<crate::app::AppState>().invoke_read_tag_succeeded(ui_spool_info);
+            } else if *filament_staging_borrow.origin() == StagingOrigin::Encoded {
+                ui.unwrap()
+                    .global::<crate::app::AppState>()
+                    .invoke_update_spool_staging(ui_spool_info.clone(), crate::app::SpoolStagingState::Encoded);
+            } else if *filament_staging_borrow.origin() == StagingOrigin::Unloaded {
+                ui.unwrap().global::<crate::app::AppState>().invoke_tag_unloaded(ui_spool_info);
+            } else {
+                ui.unwrap()
+                    .global::<crate::app::AppState>()
+                    .invoke_update_spool_staging(ui_spool_info.clone(), crate::app::SpoolStagingState::Unchanged);
             }
         }
     }
@@ -1620,7 +1727,7 @@ impl BambuPrinterObserver for ViewModel {
         bambu_printer: &mut BambuPrinter,
         prev_trays_bits: &TrayBits,
         new_trays_bits: &TrayBits,
-        removed_tags: &HashMap<usize, TagInformation>,
+        removed_tags: &HashMap<usize, SpoolId>,
     ) {
         // note - accepting bambu_printer rather than taking from self, because it's already borrowed and another borrow will panic
         let current_selected_printer = self.bambu_printer_model.index;
@@ -1685,22 +1792,20 @@ impl BambuPrinterObserver for ViewModel {
 
         // Unloaded spool case - load tag if exist on that spool to staging (for weighting)
         // take one of the unloaded tags (realistically there should be only one)
-        if let Some(removed_tag) = removed_tags.iter().next() {
+        if let Some(removed_spool) = removed_tags.iter().next() {
             if [StagingOrigin::Empty, StagingOrigin::Unloaded].contains(self.filament_staging.borrow().origin()) {
                 // only if empty or was unloaded (so not scanned or encoded)
-                self.filament_staging
-                    .borrow_mut()
-                    .set_tag_info(Box::new(removed_tag.1.clone()), filament_staging::StagingOrigin::Unloaded);
-                self.display_filament_staging_direct(bambu_printer);
-                if let Some(removed_tag_id) = &removed_tag.1.id {
-                    let _ = self.store.try_send_op(StoreOp::ReadExtInfo { id: removed_tag_id.clone() });
+                if let Some(spool_rec) = self.store.get_spool_by_id(removed_spool.1) {
+                    self.filament_staging.borrow_mut().set_spool_record(spool_rec, StagingOrigin::Unloaded);
+                    self.display_filament_staging_direct(bambu_printer);
+                    let _ = self.store.try_send_op(StoreOp::ReadExtInfo { id: removed_spool.1.clone() });
+                    // if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info_direct(bambu_printer, removed_tag.1) {
+                    //     self.ui_weak
+                    //         .unwrap()
+                    //         .global::<crate::app::AppState>()
+                    //         .invoke_update_spool_staging(ui_spool_info, crate::app::SpoolStagingState::Unloaded);
+                    // }
                 }
-                // if let Some(ui_spool_info) = self.tag_info_to_ui_spool_info_direct(bambu_printer, removed_tag.1) {
-                //     self.ui_weak
-                //         .unwrap()
-                //         .global::<crate::app::AppState>()
-                //         .invoke_update_spool_staging(ui_spool_info, crate::app::SpoolStagingState::Unloaded);
-                // }
             }
         }
     }
@@ -1861,7 +1966,11 @@ impl SpoolTagObserver for ViewModel {
                     }
 
                     if !encode_cookie.spool_id.is_empty() {
-                        tag_info.id = Some(encode_cookie.spool_id);
+                        tag_info.id = Some(encode_cookie.spool_id.clone());
+                        if let Some(spool_rec) = self.store.get_spool_by_id(&encode_cookie.spool_id) {
+                            self.filament_staging.borrow_mut().set_spool_record(spool_rec, StagingOrigin::Encoded);
+                            self.display_filament_staging();
+                        }
                     }
 
                     if let Err(err) = self.store.try_send_op(StoreOp::WriteTag {
@@ -1878,11 +1987,6 @@ impl SpoolTagObserver for ViewModel {
                     }) {
                         info!("Error writing tag to store : {}", err);
                     }
-
-                    self.filament_staging
-                        .borrow_mut()
-                        .set_tag_info(Box::new(tag_info), StagingOrigin::Encoded);
-                    self.display_filament_staging();
 
                     let (ams_id, tray_id) = BambuPrinter::get_ams_and_tray_id(*pure_tray_id);
                     let ams_id_for_ui = Self::ams_if_for_ui(ams_id);
@@ -1901,9 +2005,6 @@ impl SpoolTagObserver for ViewModel {
                     // Tag with this tag_id is in store, but w/o K there, and the tag has K - for upgrading from old tags with K to new K approach
                     // if let Some(mut tag_info) = tag_info_clone {
                     if let Some(tag_id) = &tag_info.tag_id {
-                        self.filament_staging
-                            .borrow_mut()
-                            .set_tag_info(Box::new(tag_info.clone()), StagingOrigin::Scanned);
                         let (spool_rec, need_to_store, k_info) = {
                             if self.store.is_available() {
                                 let spool_rec = self.store.get_spool_by_tag_id(tag_id);
@@ -1945,7 +2046,7 @@ impl SpoolTagObserver for ViewModel {
                             }
 
                             // filament_staging will update the tag "id" field from this
-                            self.filament_staging.borrow_mut().set_spool_record(spool_rec);
+                            self.filament_staging.borrow_mut().set_spool_record(spool_rec, StagingOrigin::Scanned);
                         }
                         // at this time (becaue tag has data, which won't be the case in the future),
                         // we can already display the tag info accumulated so far
@@ -2199,7 +2300,7 @@ impl SpoolScaleObserver for ViewModel {
     fn on_button_pressed(&mut self, scale_weight: ScaleWeight) -> Option<bool> {
         let ui = self.ui_weak.unwrap();
         let ui_app_state = ui.global::<crate::app::AppState>();
-        if let Some(tag_info) = self.filament_staging.borrow().tag_info() {
+        if let Some(full_spool_rec) = self.filament_staging.borrow().full_spool_rec() {
             match scale_weight {
                 ScaleWeight::Stable(weight) => {
                     if weight == 0 {
@@ -2209,10 +2310,10 @@ impl SpoolScaleObserver for ViewModel {
                             crate::app::StatusType::Error,
                         );
                         Some(false)
-                    } else if let Err(err) = self.store.try_send_op(StoreOp::WriteTag {
-                        tag_info: Box::new(tag_info.clone()),
-                        k_info: None,
-                        tag_operation: TagOperation::UpdateWeight { weight },
+                    } else if let Err(err) = self.store.try_send_op(StoreOp::Write {
+                        id: full_spool_rec.spool_rec.id.clone(),
+                        spool_rec_op: SpoolRecOp::Update(Box::new(move |spool_rec| spool_rec.weight_current = Some(weight))),
+                        spool_rec_ext_op: SpoolRecExtOp::Noop,
                         cookie: Box::new(StoreWriteTagCookie {
                             notify_scale: true,
                             store_request_origin: StoreRequestOrigin::UpdateWeight,
@@ -2309,7 +2410,12 @@ impl StoreObserver for ViewModel {
                     let spool_rec_id = spool_rec.id.clone();
                     if [StoreRequestOrigin::Scan, StoreRequestOrigin::Encode].contains(&cookie.store_request_origin) {
                         // filament_staging will update the tag "id" field from this
-                        self.filament_staging.borrow_mut().set_spool_record(spool_rec);
+                        let staging_origin = match cookie.store_request_origin {
+                            StoreRequestOrigin::Scan => StagingOrigin::Scanned,
+                            StoreRequestOrigin::Encode => StagingOrigin::Encoded,
+                            StoreRequestOrigin::UpdateWeight => unreachable!(),
+                        };
+                        self.filament_staging.borrow_mut().set_spool_record(spool_rec, staging_origin);
                         self.filament_staging.borrow_mut().set_spool_record_ext(spool_rec_ext);
                         self.display_filament_staging();
                     } else if cookie.store_request_origin == StoreRequestOrigin::UpdateWeight {
@@ -2455,12 +2561,8 @@ pub async fn store_printers_consume(view_model: Rc<RefCell<ViewModel>>) {
                 {
                     let printer_borrow = printer.borrow();
                     let tray = &printer_borrow.ams_trays()[tray_id];
-                    spool_id = if let Some(tag_info) = &tray.meta_info.tag_info {
-                        if let Some(id) = &tag_info.id {
-                            id.clone()
-                        } else {
-                            continue;
-                        }
+                    spool_id = if let Some(spool_id) = &tray.meta_info.spool_id {
+                        spool_id.clone()
                     } else {
                         continue;
                     };
