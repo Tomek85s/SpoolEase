@@ -9,6 +9,11 @@ component OperationSelectionStep inherits Rectangle {
     callback next-clicked;
     callback cancel-clicked;
     background: white;
+    property <NewTagOperation> selected-operation: None;
+    function pressed(operation: NewTagOperation) {
+       selected-operation = selected-operation == operation ? NewTagOperation.None : operation;
+    }
+
     VerticalLayout {
         Title {
             text: "New Tag Scanned";
@@ -30,31 +35,32 @@ component OperationSelectionStep inherits Rectangle {
 
             VerticalLayout {
                 b1 := MyButton {
-                    type: ButtonType.PushButton;
+                    type: ButtonType.RadioButton;
+                    pushed: selected-operation == NewTagOperation.LinkTagToSpoolId;
                     height: 56px;
                     text: "Link Tag to an Untagged Spool";
                     pressed => {
-                        b2.pushed = false;
-                        AppState.new-tag-operation = self.pushed ? NewTagOperation.LinkTagToSpoolId : NewTagOperation.None;
+                        pressed(NewTagOperation.LinkTagToSpoolId);
                     }
                 }
 
                 b2 := MyButton {
                     visible: AppBackend.recently_added_spool_id_if_untagged() != "";
-                    type: ButtonType.PushButton;
+                    pushed: selected-operation == NewTagOperation.LinkTagToRecentlyAddedSpool;
+                    type: ButtonType.RadioButton;
                     height: 56px;
                     text: "Link Tag to Recently Added Spool (ID: \{AppBackend.recently_added_spool_id_if_untagged()})";
                     pressed => {
-                        b1.pushed = false;
-                        AppState.new-tag-operation = self.pushed ? NewTagOperation.LinkTagToRecentlyAddedSpool : NewTagOperation.None;
+                        pressed(NewTagOperation.LinkTagToRecentlyAddedSpool);
                     }
                 }
             }
         }
 
         WizardButtons {
-            next-enabled: AppState.new-tag-operation != NewTagOperation.None;
+            next-enabled: selected-operation != NewTagOperation.None;
             next-clicked => {
+                AppState.new-tag-operation = selected-operation;
                 root.next-clicked();
             }
             cancel-clicked => {
@@ -306,7 +312,7 @@ export component NewTagScan inherits Rectangle {
 
     if AppState.new-tag-scan-page == NewTagScanPage.MeasureWeight: measure-weight-display := MeasureWeightPage {
         next-clicked => {
-          AppBackend.set-spool-weight(AppState.new-tag-scan-spool-id, AppState.spool-scale-weight, self.unused, true);
+            AppBackend.set-spool-weight(AppState.new-tag-scan-spool-id, AppState.spool-scale-weight, self.unused, true);
         }
         cancel-clicked => {
             AppState.control-state = ControlState.Ready;
