@@ -11,8 +11,10 @@ export enum ButtonType {
 }
 
 export component MyButton inherits Rectangle {
+    callback pressed;
+    callback released;
     in property <ButtonType> type: ButtonType.Standard;
-    in property <string> text;
+    in-out property <string> text;
     in property <length> text-padding;
     in property <bool> enabled: true;
     in-out property <bool> pushed: false;
@@ -33,10 +35,17 @@ export component MyButton inherits Rectangle {
     area := TouchArea {
         width: parent.width;
         height: parent.height;
-        clicked => {
-            if type == ButtonType.PushButton {
+        changed pressed => {
+            if self.pressed == true && type == ButtonType.PushButton {
                 root.pushed = !root.pushed;
             }
+            if self.pressed == true {
+                root.pressed();
+            } else {
+                root.released();
+            }
+        }
+        clicked => {
             if enabled {
                 root.clicked();
             }
@@ -529,16 +538,16 @@ export component WizardButtons inherits HorizontalLayout {
     MyButton {
         text: "◀ Back";
         clicked => {
-          back-clicked();
+            back-clicked();
         }
         enabled: back-enabled;
     }
 
     MyButton {
-        text: next-text == "" ? (last-page ? "✓ Finish" : "Next ▶") : next-text ;
+        text: next-text == "" ? (last-page ? "✓ Finish" : "Next ▶") : next-text;
         enabled: next-enabled;
         clicked => {
-          next-clicked();
+            next-clicked();
         }
     }
 

@@ -38,11 +38,11 @@ export component Display inherits Rectangle {
 export component NumButton inherits MyButton {
     in property <int> digit;
     text: "\{digit}";
-    callback pressed(digit: int);
+    callback key-pressed(digit: int);
     preferred-width: 1px; // so all equal
     preferred-height: 1px;
     clicked => {
-        pressed(digit);
+        key-pressed(digit);
     }
 }
 
@@ -76,21 +76,21 @@ export component NumPad inherits Rectangle {
             vertical-stretch: 1;
             NumButton {
                 digit: 7;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
 
             NumButton {
                 digit: 8;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
 
             NumButton {
                 digit: 9;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
@@ -99,21 +99,21 @@ export component NumPad inherits Rectangle {
         HorizontalLayout {
             NumButton {
                 digit: 4;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
 
             NumButton {
                 digit: 5;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
 
             NumButton {
                 digit: 6;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
@@ -122,21 +122,21 @@ export component NumPad inherits Rectangle {
         HorizontalLayout {
             NumButton {
                 digit: 1;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
 
             NumButton {
                 digit: 2;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
 
             NumButton {
                 digit: 3;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
@@ -145,7 +145,7 @@ export component NumPad inherits Rectangle {
         HorizontalLayout {
             NumButton {
                 text: "Del";
-                pressed(digit) => {
+                key-pressed(digit) => {
                     root.number = floor(root.number / 10);
                     display-error = "";
                 }
@@ -153,14 +153,14 @@ export component NumPad inherits Rectangle {
 
             NumButton {
                 digit: 0;
-                pressed(digit) => {
+                key-pressed(digit) => {
                     pressed-digit(digit);
                 }
             }
 
             NumButton {
                 text: ok-visible ? "Ok" : "";
-                pressed(digit) => {
+                key-pressed(digit) => {
                     if ok-visible {
                         root.ok-clicked();
                     }

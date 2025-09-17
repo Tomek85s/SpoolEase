@@ -33,7 +33,7 @@ component OperationSelectionStep inherits Rectangle {
                     type: ButtonType.PushButton;
                     height: 56px;
                     text: "Link Tag to an Untagged Spool";
-                    clicked => {
+                    pressed => {
                         b2.pushed = false;
                         AppState.new-tag-operation = self.pushed ? NewTagOperation.LinkTagToSpoolId : NewTagOperation.None;
                     }
@@ -44,7 +44,7 @@ component OperationSelectionStep inherits Rectangle {
                     type: ButtonType.PushButton;
                     height: 56px;
                     text: "Link Tag to Recently Added Spool (ID: \{AppBackend.recently_added_spool_id_if_untagged()})";
-                    clicked => {
+                    pressed => {
                         b1.pushed = false;
                         AppState.new-tag-operation = self.pushed ? NewTagOperation.LinkTagToRecentlyAddedSpool : NewTagOperation.None;
                     }
