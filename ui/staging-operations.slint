@@ -45,7 +45,7 @@ component SpoolDisplayStep inherits Rectangle {
             MyButton {
                 text: "Close";
                 clicked => {
-                    AppState.control-state = ControlState.Ready;
+                    AppState.prompt-select-tray();
                 }
             }
         }

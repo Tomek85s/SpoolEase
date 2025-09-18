@@ -422,6 +422,11 @@ export global AppState {
         self.control-state = ControlState.Ready;
     }
 
+    public function prompt-select-tray() {
+        self.tray-selected-tray-index = -1;
+        AppState.control-state = ControlState.Ready;
+    } 
+
     // public function encode-select-tray(tray-index: int) {
     //     // note, every change to curr-encode-request automatically recalculate display
     //     // so changes here are immediately reflected in UI

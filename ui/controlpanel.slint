@@ -179,7 +179,7 @@ export component Ready inherits ControlPanelBase {
     }
 
     message-color: color-timer.color;
-    message-text: (AppState.spool-staging-state == SpoolStagingState.Empty ? "Scanning for Tagged Spool..." : "Load Spool\nor Rescan Tag") + 
+    message-text: (AppState.spool-staging-state == SpoolStagingState.Empty ? "Scanning for Tagged Spool..." : "Load Spool or Rescan Tag") + 
                   (AppState.available-printers.length > 1 ? "\n\n\{AppState.curr-printer}" : "") +
                   (AppState.available-printers.length >= 1 && AppState.some-printer-connected ? "" : "\n\n- Connecting to Printer(s) -");
     button1-text: (AppState.spool-staging-state != SpoolStagingState.Empty) ? "Clear Staging" : "";
@@ -212,18 +212,18 @@ export component Ready inherits ControlPanelBase {
 //     }
 // }
 
-// export component StagingSelected inherits ControlPanelBase {
-//     message-text: "Press Slot to Configure\nor Staging to View Tag";
-//     // button1-text: "Clear Staging";
-//     button2-text: "Cancel";
-//     button2-timeout: 10;
-//     // clicked1() => {
-//     //     AppBackend.clear-staging();
-//     // }
-//     clicked2() => {
-//         AppState.control-state = ControlState.Ready;
-//     }
-// }
+export component TraySelect inherits ControlPanelBase {
+    message-text: "Press Slot to Configure";
+    // button1-text: "Clear Staging";
+    button2-text: "Cancel";
+    button2-timeout: 10;
+    // clicked1() => {
+    //     AppBackend.clear-staging();
+    // }
+    clicked2() => {
+        AppState.control-state = ControlState.Ready;
+    }
+}
 
 export component OperationBase inherits ControlPanelBase {
     message-text: AppState.user-message;
@@ -302,9 +302,11 @@ export component ControlPanel inherits HorizontalLayout {
     // if AppState.control-state == ControlState.EncodeSelectSource: EncodeSelectSource {
     //     button-width: button-width;
     // }
-    // if AppState.control-state == ControlState.StagingSelected: StagingSelected {
-    //     button-width: button-width;
-    // }
+
+    if AppState.control-state == ControlState.TraySelect: TraySelect {
+        button-width: button-width;
+    }
+
     if AppState.control-state == ControlState.Encoding: Encoding {
         button-width: button-width;
     }
