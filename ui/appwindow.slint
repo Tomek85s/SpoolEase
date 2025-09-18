@@ -92,16 +92,10 @@ export component AppWindow inherits Window {
                 alignment: stretch;
                 top := HorizontalLayout {
                     spacing: AppConsts.trays-spacing;
-                    external := Trays {
-                        is_ams: false;
-                        title: "External"; //"\{AppState.highlight-box}";
-                        tray_numbers: [0];
-                        trays-state: AppState.trays-state;
-                    }
 
                     // Separating the external tray from the ams trays so can scroll the ams trays in case of several ams's
-                if AppState.ams-exists.length > 0: 
-                  ams := Trays {
+                    if AppState.ams-exists.length > 0: 
+                      ams := Trays {
                         is_ams: true;
                         title: "AMS - " + (AppState.curr-ams-id + 1);
                         include-paging-left: false;
@@ -112,6 +106,13 @@ export component AppWindow inherits Window {
                             AppState.curr-ams-id * 4 + 3,
                             AppState.curr-ams-id * 4 + 4
                         ] : [15 + AppState.curr-ams-id - 3 + 1];
+                        trays-state: AppState.trays-state;
+                    }
+
+                    external := Trays {
+                        is_ams: false;
+                        title: "External"; //"\{AppState.highlight-box}";
+                        tray_numbers: [0];
                         trays-state: AppState.trays-state;
                     }
                 }
