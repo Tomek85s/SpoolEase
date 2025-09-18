@@ -136,6 +136,7 @@ export global AppBackend {
     callback clear-staging();
     callback set-staging-to-tray(tray-id: int);
     // callback encode-tag(encode_request: EncodeRequest) -> int; // returns how long it will try to encode, for timer
+    callback encode-tag() -> bool;
     // callback clear-encode-scratchpad();
     // callback notify-start-encode(tray_id: int) -> bool;
     callback read-tag-mode();
@@ -346,29 +347,22 @@ export global AppState {
         self.reset-staging-countdown = true;
     }
 
-
     // TODO: names are ok, but should be changed for encoding a spool-id
     public function encode-tag-found() {
         self.control-state = ControlState.Encoding;
-        self.user-message = "Tag Found,\nEncoding ...";
+        self.user-message = "Tag Found, Encoding ...";
         self.user-message-type = StatusType.Normal;
     }
 
-    public function encoding-failed(err-txt: string) {
-        // this is just a termporary failure, not final, can still try placing tag to encode
-        self.control-state = ControlState.PostAction;
-        self.user-message = "Encoding Tag Failed\n\{err-txt}";
+    public function encoding-failure(err-txt: string) {
+        // this is just a termporary failure, not final, can still try placing tag to encode, so NOT PostAction
+        self.user-message = "Encoding Tag Error\n\{err-txt}";
         self.user-message-type = StatusType.Error;
     }
-    public function encoding-succeeded(ams-id: int, tray-id: int) {
-      // 254 - External Tray
-      // 999 - Staging
-      // 998 - From blank
+    public function encoding-succeeded() {
         self.control-state = ControlState.PostAction;
-        self.user-message = (tray-id == 998) ? "Encoding Succeeded" : (tray-id == 999 ? "Encoding\nStaging Filament\nSucceeded" : tray-id == 254 ? "Encoding\nExternal Slot Filament\nSucceeded" : "Encoding\nAMS \{ams-id + 1}, Slot \{tray-id + 1} Filament\nSucceeded");
+        self.user-message = "Encoding Succeeded";
         self.user-message-type = StatusType.Success;
-        self.stop-highlight-tray();
-        // clear-curr-encoding-request();
     }
 
     public function tray-update-failed(printer: string, ams-id: int, tray-id: int, err-txt: string) {
@@ -485,29 +479,18 @@ export global AppState {
         self.user-message = "Encoding Tag Timed Out";
         self.user-message-type = StatusType.Error;
 
-        // if want to go back to the encode screen use:
-           // self.control-state = ControlState.EncodeEditing;
-           // AppBackend.encode-web-app()
-           // Don't stop-highlight-tray
-        // else
-        clear-curr-encoding-request();
         AppBackend.read-tag-mode();
-        AppState.stop-highlight-tray();
         // don't call encode-cancel() becasue on timeout we want to show timeout first on display
     }
 
     public function encode-cancel() {
-        clear-curr-encoding-request();
-        // AppBackend.clear-encode-scratchpad();
-        self.control-state = ControlState.Ready;
         AppBackend.read-tag-mode();
-        AppState.stop-highlight-tray();
+        self.control-state = ControlState.Ready;
     }
 
     public function encode-start() {
-        // self.encode-timeout = AppBackend.encode-tag(self.curr-encode-request);
-        if self.encode-timeout != 0 { // return value of 0 means there was an error, error will be reported separately
-              AppState.start-highlight-tray-forever(self.curr-encode-request.tray-id);
+        if AppBackend.encode-tag() { // return value of 0 means there was an error, error will be reported separately
+            self.encode-timeout = 15;
             self.control-state = ControlState.Encoding;
             user-message = "Place Spool Tag\nto Encode";
             user-message-type = StatusType.Normal;

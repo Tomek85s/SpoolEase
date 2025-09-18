@@ -33,7 +33,9 @@ use shared::gcode_analysis_task::Fetch3mf;
 
 use crate::app_config::{AppConfig, DefaultPrinterConfig, PrinterConfig, PrintersConfig, ScaleConfig, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
 use crate::bambu::KInfo;
-use crate::store::{SpoolRecordExt, Store};
+
+use crate::store::Store;
+use crate::spool_record::{SpoolRecord, SpoolRecordExt};
 use crate::view_model::ViewModel;
 
 #[derive(Clone)]
@@ -302,7 +304,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
             post(
                 async move |State(Encryption(key)): State<Encryption>, State(state): State<ConsoleAppState>, add_spool: AddSpoolDTO| {
                     let store = state.store;
-                    let new_spool = crate::store::SpoolRecord {
+                    let new_spool = SpoolRecord {
                         id: add_spool.id,
                         tag_id: String::new(),
                         material_type: add_spool.material,

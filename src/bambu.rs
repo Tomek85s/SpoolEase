@@ -9,7 +9,7 @@ use crate::{
     bambu_api::GcodeState,
     settings::MAX_NUM_PRINTERS,
     ssdp::{SSDPInfo, SSDPPubSubChannel},
-    store::{FullSpoolRecord, SpoolRecord, Store},
+    store::Store,
 };
 use alloc::{
     borrow::Cow,
@@ -41,6 +41,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use shared::{gcode_analysis_task::Fetch3mf, spool_tag::TAG_PLACEHOLDER};
+use crate::spool_record::{SpoolRecord, SpoolRecordExt, FullSpoolRecord};
 
 use framework::prelude::*;
 
@@ -51,7 +52,7 @@ use crate::{
 };
 
 const FILAMENT_URL_PREFIX: &str = "https://info.filament3d.org/";
-const FILAMENT_URL_PREFIX_V1_TAG: &str = "https://info.filament3d.org/V1/";
+const FILAMENT_URL_PREFIX_V1_TAG: &str = "https://info.filament3d.org/V1";
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -1479,7 +1480,7 @@ impl BambuPrinter {
             return false;
         }
         let mut res = true;
-        if filament.nozzle_temp_min == 0 || filament.nozzle_temp_max == 0 {
+        if filament.nozzle_temp_min == 0 || filament.nozzle_temp_max == 0 || filament.tray_info_idx.is_empty() {
             res = false;
             for (line_index, material_line) in MATERIALS.lines().enumerate() {
                 if line_index == 0 {
@@ -1775,7 +1776,7 @@ impl BambuPrinter {
         None
     }
 
-    pub fn get_tag_info_to_encode(&self, tray_id: usize) -> Result<TagInformation, String> {
+    pub fn get_tag_info_to_encode(&self, tray_id: usize) -> Result<TagInformationV1, String> {
         let tray = if tray_id == 254 {
             self.virt_tray()
         } else if (0..self.ams_trays().len()).contains(&tray_id) {
@@ -1789,7 +1790,7 @@ impl BambuPrinter {
         // if there's a tag in that tray, lets start with that to include any info it has inside
         // let mut tag_info = tray.tag_info.as_ref().unwrap_or(&TagInformation::default()).clone();
 
-        let mut tag_info = TagInformation::default();
+        let mut tag_info = TagInformationV1::default();
         // Take the color and other filament information from what the use actually sees, potentially different from what is in the tag in that tray
         // Could also be the tag doesn't even contain that information if it was generated using inventory only
         if let Filament::Known(filament_info) = &tray.filament {
@@ -1817,7 +1818,7 @@ pub type SpoolId = String;
 pub struct TrayMetaInfo {
     pub spool_id: Option<SpoolId>,
     #[serde(rename = "tag_info", skip_serializing)]
-    pub old_tag_info: Option<TagInformation>, // calibration for nozzles
+    pub old_tag_info: Option<TagInformationV1>, // calibration for nozzles
     #[serde(default)]
     pub consumed_since_load: f32,
     #[serde(default)]
@@ -2553,7 +2554,7 @@ pub async fn bambu_mqtt_task(
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-pub struct TagInformation {
+pub struct TagInformationV1 {
     pub id: Option<String>,
     pub tag_id: Option<Vec<u8>>,
     pub filament: Option<FilamentInfo>,
@@ -2571,7 +2572,7 @@ pub struct TagInformation {
     pub calibrations_printer_uuid: String, // has value only if calibrations has any value
 }
 
-impl TagInformation {
+impl TagInformationV1 {
     pub fn from(v: &SpoolRecord, min_max_temp: (u32, u32)) -> Self {
         // TODO: need to deal with case of no data or partial data for filament_info?
         let filament_info = {
@@ -2681,7 +2682,7 @@ pub struct KNozzleId {
 
 // k_info.printers["01P..."][0]["0.4"]["HH00"].name / .k
 
-impl TagInformation {
+impl TagInformationV1 {
     pub fn to_v1_descriptor(&self, _printer_name: Option<&str>, _printer_uuid: Option<&str>) -> Option<String> {
         // let mut inner_calibrations_part = String::new();
         //

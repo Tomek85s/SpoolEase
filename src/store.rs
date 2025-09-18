@@ -1,13 +1,9 @@
-use core::{any::Any, cell::RefCell};
+use core::cell::RefCell;
 use embassy_time::{Instant, Timer};
 use hashbrown::HashMap;
 use once_cell::unsync::OnceCell;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Deserializer;
-use shared::utils::{
-    deserialize_bool_yn_empty_n, deserialize_f32_base64, deserialize_optional, deserialize_optional_bool_yn, serialize_bool_yn, serialize_f32_base64,
-    serialize_optional_bool_yn,
-};
 use snafu::prelude::*;
 
 use alloc::{
@@ -19,7 +15,7 @@ use alloc::{
 };
 // use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel};
 use framework::{
-    debug, error, info, mk_static,
+    debug, error, info,
     ntp::InstantExt,
     prelude::{Framework, SDCardStoreErrorSource},
     settings::{FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES},
@@ -27,15 +23,13 @@ use framework::{
 };
 
 use crate::{
-    bambu::{KInfo, KNozzleId, TagInformation},
-    csvdb::{CsvDb, CsvDbError, CsvDbId},
+    bambu::{KInfo, TagInformationV1},
+    csvdb::{CsvDb, CsvDbError},
     view_model::ViewModel,
 };
 
-// #[derive(Snafu, Debug)]
-// pub enum InternalError {
-//     BadId,
-// }
+use crate::spool_record::{SpoolRecord, SpoolRecordExt};
+
 const STORE_VER: &str = "1.1.0";
 
 #[derive(Snafu, Debug)]
@@ -459,7 +453,7 @@ impl Store {
                     Ok(loaded_spool_rec_ext) => {
                         spool_rec_ext = loaded_spool_rec_ext;
                         if let Some(tag_desciptor) = &spool_rec_ext.tag {
-                            match TagInformation::from_v1_descriptor(tag_desciptor) {
+                            match TagInformationV1::from_v1_descriptor(tag_desciptor) {
                                 Ok(tag_info) => {
                                     if !tag_info.calibrations.is_empty() {
                                         let k_info = view_model.borrow().get_k_info_from_old_tag(&tag_info);
@@ -601,96 +595,6 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
         Timer::after_secs(60).await;
         // match receiver.receive().await {
         // }
-    }
-}
-
-// TODO: think if to change it to get the spoolRecord from store (and it will hold Rc to store)
-#[derive(Debug, Clone, Default)]
-pub struct FullSpoolRecord {
-    pub spool_rec: SpoolRecord,
-    pub spool_rec_ext: SpoolRecordExt,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
-pub struct SpoolRecord {
-    pub id: String,
-    pub tag_id: String,           // 14 (7*2)
-    pub material_type: String,    // 10
-    pub material_subtype: String, // 10
-    pub color_name: String,       // 10
-    pub color_code: String,       // 8
-    pub note: String,             // 40
-    pub brand: String,            // 30
-    #[serde(deserialize_with = "deserialize_optional")]
-    pub weight_advertised: Option<i32>, // 4
-    #[serde(deserialize_with = "deserialize_optional")]
-    pub weight_core: Option<i32>, // 4
-    #[serde(deserialize_with = "deserialize_optional")]
-    pub weight_new: Option<i32>, // 4
-    #[serde(deserialize_with = "deserialize_optional")]
-    pub weight_current: Option<i32>, // 4
-    #[serde(default)]
-    pub slicer_filament: String,
-    #[serde(default, deserialize_with = "deserialize_optional")]
-    pub added_time: Option<i32>,
-    #[serde(default, deserialize_with = "deserialize_optional")]
-    pub encode_time: Option<i32>,
-    #[serde(default, serialize_with = "serialize_optional_bool_yn", deserialize_with = "deserialize_optional_bool_yn")]
-    pub added_full: Option<bool>,
-    #[serde(default, serialize_with = "serialize_f32_base64", deserialize_with = "deserialize_f32_base64")]
-    pub consumed_since_add: f32,
-    #[serde(default, serialize_with = "serialize_f32_base64", deserialize_with = "deserialize_f32_base64")]
-    pub consumed_since_weight: f32,
-    #[serde(default, serialize_with = "serialize_bool_yn", deserialize_with = "deserialize_bool_yn_empty_n")]
-    pub ext_has_k: bool,
-    // #[serde(default,deserialize_with = "deserialize_optional_unit")]
-    // pub price: Option<()>,
-    // #[serde(default,deserialize_with = "deserialize_optional_unit")]
-    // pub quality: Option<()>,
-    // #[serde(default,deserialize_with = "deserialize_optional_unit")]
-    // pub diameter: Option<()>,
-    //
-    // #[serde(default,deserialize_with = "deserialize_optional_unit")]
-    // pub location: Option<()>,
-    //
-    // #[serde(default,deserialize_with = "deserialize_optional_unit")]
-    // pub purchased: Option<()>,
-    // #[serde(default,deserialize_with = "deserialize_optional_unit")]
-    // pub opened: Option<()>,
-    // #[serde(default,deserialize_with = "deserialize_optional_unit")]
-    // pub dried: Option<()>,
-    // #[serde(default,deserialize_with = "deserialize_optional_unit")]
-    // pub last_used: Option<()>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct SpoolRecordExt {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub k_info: Option<KInfo>,
-}
-
-impl SpoolRecordExt {
-    pub fn get_calibrations(&self, printer: &str, extruder: i32, diameter: &str, nozzle_id: &str) -> Option<&KNozzleId> {
-        let res = self
-            .k_info
-            .as_ref()?
-            .printers
-            .get(printer)?
-            .extruders
-            .get(&extruder)?
-            .diameters
-            .get(diameter)?
-            .nozzles
-            .get(nozzle_id);
-        res
-    }
-}
-
-impl CsvDbId for SpoolRecord {
-    fn id(&self) -> &String {
-        &self.id
     }
 }
 

@@ -106,7 +106,7 @@ export component ControlPanelBase inherits HorizontalLayout {
         }
 
         Rectangle {
-            background: message-type == StatusType.Success ? green.brighter(1.0) : message-type == StatusType.Error ? red : white;
+            background: message-type == StatusType.Success ? green.brighter(1.0) : (message-type == StatusType.Error ? red : white);
             preferred-width: 480px;
             border-width: text-border-width;
             border-color: black;
@@ -232,6 +232,7 @@ export component OperationBase inherits ControlPanelBase {
 // TODO: No need for OperationBase and Reading sharing with Encoding the Operation Base
 // Need just Encoding and Reading, share maybe only the user-message, or maybe some alternative to that in form of state
 export component Encoding inherits OperationBase {
+    message-type: AppState.user-message-type;
     text-border-timer := Timer {
         property <length> text-border-width: 1px;
         interval: 0.3s;

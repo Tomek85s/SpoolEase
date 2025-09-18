@@ -1,7 +1,8 @@
 use alloc::rc::Rc;
 use framework::error;
 
-use crate::store::{FullSpoolRecord, SpoolRecord, SpoolRecordExt, Store};
+use crate::store::Store;
+use crate::spool_record::{SpoolRecord, SpoolRecordExt, FullSpoolRecord};
 
 pub struct FilamentStaging {
     // tag_info: Option<TagInformation>,
