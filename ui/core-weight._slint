@@ -1,3 +1,5 @@
+// This is left in project as _slint because it has several techniques that might be useful in the future
+
 import { MyButton, Title, Selector, LeftTab, HorizontalSelector, MyText } from "framework/widgets.slint";
 import { NumPad } from "numpad.slint";
 import { AppState, AppBackend, ControlState, SpoolScaleState } from "app.slint";

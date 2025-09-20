@@ -87,14 +87,6 @@ component OperationSelectionStep inherits Rectangle {
             }
 
             Row {
-                // MyButton {
-                //     enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
-                //     text: "View Info";
-                //     clicked => {
-                //         AppState.show-filament-information(999);
-                //     }
-                // }
-
                 MyButton {
                     enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
                     text: "Encode Tag";

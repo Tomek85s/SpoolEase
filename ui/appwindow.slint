@@ -143,11 +143,6 @@ export component AppWindow inherits Window {
         }
     }
 
-    // if AppState.control-state == ControlState.FilamentInformation: filament-information := FilamentInfo {
-    //     mode: FilamentInfoMode.View;
-    //     height: root.height;
-    // }
-
     if AppState.control-state == ControlState.NewTagScan: new-tag-scan := NewTagScan {
         width: root.width;
         height: root.height;

@@ -246,7 +246,6 @@ export component Trays {
                     if AppState.control-state == ControlState.TraySelect {
                         AppBackend.set-staging-to-tray(trays-state[index].id);
                     } else if (AppState.control-state == ControlState.Ready || AppState.control-state == ControlState.PostAction) {
-                        // AppState.show-filament-information(index);
                         AppState.tray-selected(index);
                     }
                 }

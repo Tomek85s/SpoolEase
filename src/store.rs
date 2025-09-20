@@ -68,21 +68,6 @@ pub enum StoreError {
     ExtFormat { source: serde_json::error::Error },
 }
 
-// #[allow(clippy::enum_variant_names, dead_code)]
-// #[derive(Debug)]
-// pub enum WeightStoreDirective {
-//     ProvidedCurrentWeight(i32),
-//     UseStoreCurrentWeight,
-// }
-//
-// #[derive(Debug)]
-// pub enum StoreOp {
-//     ReadExtInfo {
-//         id: String,
-//         // if need several use cases, add cookie
-//     },
-// }
-
 // DON'T ERASE - May be useful in the future
 // // Cookie - General code
 // pub trait AnyClone: Any + core::fmt::Debug {
@@ -116,12 +101,6 @@ pub enum StoreError {
 //     }
 // }
 
-//
-
-// type StoreRequestsChannel = Channel<NoopRawMutex, StoreOp, 5>;
-// type StoreRequestsReceiver<'a> = Receiver::<'a, NoopRawMutex, StoreOp, 5>;
-
-// embedded_hal_bus::spi::ExclusiveDevice<esp_hal::spi::master::Spi<'_, esp_hal::Async>, esp_hal::gpio::Output<'_>, embedded_hal_bus::spi::NoDelay>
 type TheSpi = embedded_hal_bus::spi::ExclusiveDevice<
     esp_hal::spi::master::Spi<'static, esp_hal::Async>,
     esp_hal::gpio::Output<'static>,
@@ -171,21 +150,6 @@ impl Store {
     pub fn subscribe(&self, observer: alloc::rc::Weak<RefCell<dyn StoreObserver>>) {
         self.observers.borrow_mut().push(observer);
     }
-
-    // pub fn notify_read_spool_record_ext(&self, result: Result<SpoolRecordExt, String>) {
-    //     if let Some((last, rest)) = self.observers.borrow().split_last() {
-    //         for weak_observer in rest.iter() {
-    //             let observer = weak_observer.upgrade().unwrap();
-    //             observer.borrow_mut().on_read_spool_record_ext(result.clone());
-    //         }
-    //         let observer = last.upgrade().unwrap();
-    //         observer.borrow_mut().on_read_spool_record_ext(result);
-    //     }
-    // }
-
-    // pub fn try_send_op(&self, op: StoreOp) -> Result<(), StoreError> {
-    //     self.requests_channel.try_send(op).map_err(|_| StoreError::TooManyOps)
-    // }
 
     pub fn is_available(&self) -> bool {
         self.spools_db.get().is_some()
