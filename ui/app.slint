@@ -169,6 +169,12 @@ export enum NewTagOperation {
 }
 
 export global AppState {
+    in-out property <string> message-box-title;
+    in-out property <string> message-box-text;
+    in-out property <string> message-box-text2;
+    in-out property <StatusType> message-box-type;
+    in-out property <int> message-box-timeout;
+
     in-out property <[UiTray]> trays-state: self.empty-trays-state();
     in-out property <bool> select-printer: false;
     in-out property <ControlState> control-state: ControlState.Booting;
@@ -197,11 +203,10 @@ export global AppState {
     in-out property <StatusType> user-message-type: StatusType.Normal;
 
     // TODO: find a better name
-    in-out property <string> spool-inventory-dialog-message: "";
-    in-out property <StatusType> spool-inventory-dialog-type: StatusType.Normal;
+    // in-out property <string> spool-inventory-dialog-message: "";
+    // in-out property <StatusType> spool-inventory-dialog-type: StatusType.Normal;
 
     in-out property <int> encode-timeout: 999;
-
 
     in-out property <int> curr-ams-id: 0;
     in-out property <[int]> ams-exists: [0];
@@ -232,14 +237,30 @@ export global AppState {
     in-out property <int> highlight-tray-counter: highlight-tray-counter-length;
 
     public pure function ui-tray-spool-state-name(state: UiTrayState) -> string {
-        if state == UiTrayState.Unknown { return "Unknown"; }
-        if state == UiTrayState.Empty { return "Slot is Empty"; }
-        if state == UiTrayState.Spool { return "Spool Placed"; }
-        if state == UiTrayState.Reading { return "Reading Filament Information"; }
-        if state == UiTrayState.Ready { return "Spool in Slot, Idle"; }
-        if state == UiTrayState.Loading { return "Retracting From Extruder"; }
-        if state == UiTrayState.Unloading { return "Loading Into Extruder"; }
-        if state == UiTrayState.Loaded { return "In Extruder"; }
+        if state == UiTrayState.Unknown {
+            return "Unknown";
+        }
+        if state == UiTrayState.Empty {
+            return "Slot is Empty";
+        }
+        if state == UiTrayState.Spool {
+            return "Spool Placed";
+        }
+        if state == UiTrayState.Reading {
+            return "Reading Filament Information";
+        }
+        if state == UiTrayState.Ready {
+            return "Spool in Slot, Idle";
+        }
+        if state == UiTrayState.Loading {
+            return "Retracting From Extruder";
+        }
+        if state == UiTrayState.Unloading {
+            return "Loading Into Extruder";
+        }
+        if state == UiTrayState.Loaded {
+            return "In Extruder";
+        }
         return "-";
     }
 
@@ -262,6 +283,23 @@ export global AppState {
     }
 
 // Functions called locally fom Rust
+
+    // timeout -1 is default as coded here, 0 is no timeout (stays on until ok), positive number - timeout in seconds
+    public function show-message-box(title: string, text: string, text2: string, type: StatusType, timeout: int) {
+        self.message-box-title = title == "" ? "Message" : title;
+        self.message-box-text = text;
+        self.message-box-text2 = text2;
+        self.message-box-type = type;
+        self.message-box-timeout = (timeout == -1 ? 10: timeout);
+    }
+
+    public function hide-message-box() {
+        self.message-box-title = "";
+        self.message-box-text = "";
+        self.message-box-text2 = "";
+        self.message-box-type = StatusType.Normal;
+        self.message-box-timeout = 0;
+    }
 
     public function printer-connected(printer-name: string) {
         if self.control-state == ControlState.Booting /*|| self.control-state == ControlState.ConnectingToPrinter*/ {
@@ -403,7 +441,6 @@ export global AppState {
         self.control-state = ControlState.TraySelected;
     }
 
-
     public function prompt-select-tray() {
         self.tray-selected-tray-index = -1;
         AppState.control-state = ControlState.Ready;
@@ -435,11 +472,6 @@ export global AppState {
 
     pure public function is-scale-usable-now() -> bool {
         return self.spool-scale-state == SpoolScaleState.Connected || self.spool-scale-state == SpoolScaleState.Empty || self.spool-scale-state == SpoolScaleState.Loaded || self.spool-scale-state == SpoolScaleState.Disconnected;
-    }
-
-    public function show-spoolscale-dialog(message: string, type: StatusType) {
-        self.spool-inventory-dialog-message = message;
-        self.spool-inventory-dialog-type = type;
     }
 
     public function spool-scale-connected() {

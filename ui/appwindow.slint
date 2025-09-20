@@ -17,6 +17,7 @@ import { NumPad } from "numpad.slint";
 import { NewTagScan } from "new-tag-scan.slint";
 import { StagingOperations } from "staging-operations.slint";
 import { TrayOperations } from "tray-operations.slint";
+import { MessageBox } from "message-box.slint";
 
 // reexport to rust
 
@@ -158,45 +159,29 @@ export component AppWindow inherits Window {
         height: root.height;
     }
 
-    if AppState.spool-inventory-dialog-message != "": Rectangle {
+    if AppState.message-box-text != "": MessageBox {
+        width: root.width;
+        height: root.height;
+        dialog-width: 416px;
+        dialog-height: 242px - (self.dialog-text2 == "" ? 76px : 0px);
+        dialog-title: AppState.message-box-title;
+        dialog-text: AppState.message-box-text;
+        dialog-text2: AppState.message-box-text2;
+        dialog-background: AppState.message-box-type == StatusType.Success ? green.brighter(1.0) : AppState.message-box-type == StatusType.Error ? red : skyblue;
+        dialog-button-text: "Ok" + (AppState.message-box-timeout != 0 ? " (\{AppState.message-box-timeout})": "");
+        clicked => {
+            AppState.hide-message-box();
+        }
+
         Timer {
-            property <int> counter: 5;
             interval: 1s;
-            running: AppState.spool-inventory-dialog-message != "";
+            running: AppState.message-box-text != "" && AppState.message-box-timeout != 0;
             triggered => {
-                counter = counter - 1;
-                if counter == 0 {
-                    AppState.spool-inventory-dialog-message = "";
-                    counter = 5;
+                AppState.message-box-timeout = AppState.message-box-timeout - 1;
+                if AppState.message-box-timeout == 0 {
+                    AppState.hide-message-box();
                 }
             }
         }
-
-        x: 320px / 5 / 2;
-        y: self.x * (480 / 320) * 1.5;
-        width: root.width - self.x * 2;
-        height: root.height - self.y * 2;
-        background: AppState.spool-inventory-dialog-type == StatusType.Success ? green.brighter(1.0) : AppState.spool-inventory-dialog-type == StatusType.Error ? red : skyblue;
-        VerticalLayout {
-            Title {
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-                text: "SpoolEase Inventory Notice!";
-                background: beige;
-            }
-
-            Rectangle {
-                MyText {
-                    horizontal-alignment: center;
-                    text: AppState.spool-inventory-dialog-message;
-                    color: AppState.spool-inventory-dialog-type == StatusType.Success ? black : AppState.spool-inventory-dialog-type == StatusType.Error ? white : black;
-                    wrap: word-wrap;
-                }
-            }
-        }
-
-        border-color: black;
-        border-width: 1px;
-        border-radius: 10px;
     }
 }

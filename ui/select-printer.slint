@@ -1,6 +1,7 @@
 import { MyButton } from "./framework/widgets.slint";
 import { AppBackend, AppState } from "app.slint";
 import { Title } from "framework/widgets.slint";
+import { Utils } from "utils.slint";
 
 export component Title inherits Rectangle {
     in-out property <string> text;
@@ -14,6 +15,7 @@ export component Title inherits Rectangle {
         height: 40px;
         text: text;
         font-size: 20px;
+        color: Utils.contrasting_color(root.background);
     }
 }
 
