@@ -1,0 +1,109 @@
+import { Title, MyText, MyButton } from "./framework/widgets.slint";
+import { AppBackend, AppState, ControlState, UiTray, UiSpoolRecord, UiSpoolRecordDisplay } from "app.slint";
+import { Utils } from "utils.slint";
+import { FrameworkState } from "framework/framework.slint";
+import { FilamentInfoMode } from "app.slint";
+import { LabeledText } from "app-widgets.slint";
+// import { SelectIfNewSpool } from "core-weight.slint";
+
+
+component LabeledInfo inherits LabeledText {
+    label-width: 90px;
+}
+
+export component ViewTitle inherits Title {
+    horizontal-alignment: center;
+    text: "Filament Information";
+}
+
+export component ViewButtons inherits HorizontalLayout {
+    MyButton {
+        horizontal-stretch: 1;
+        height: 56px;
+        text: "Close";
+        clicked => {
+            AppState.end-show-filament-information();
+        }
+    }
+}
+
+export component SpoolDisplay inherits Rectangle {
+    in-out property <UiSpoolRecordDisplay> spool-display;
+    background: white;
+    property <color> filament-color: spool-display.color;
+    in property <bool> show-title: true;
+
+    VerticalLayout {
+        alignment: stretch;
+        if show-title: Title {
+            vertical-stretch: 0;
+            background: AppState.spool-staging-info.color;
+            text-color: Utils.contrasting_color(self.background);
+            text: "Spool \{spool-display.spool-record.id} Information";
+        }
+
+        VerticalLayout {
+            alignment: stretch;
+            vertical-stretch: 1;
+            padding: 10px;
+            padding-bottom: 5px;
+            property <string> brand: spool-display.spool-record.brand == "" ? "" : "\{spool-display.spool-record.brand} ";
+            property <string> material-subtype: spool-display.spool-record.material-subtype == "" ? "" : "\{spool-display.spool-record.material_subtype}";
+            property <string> color-name: spool-display.spool-record.color-name == "" ? "" : " \{spool-display.spool-record.color-name}";
+            MyText {
+                vertical-stretch: 0;
+                horizontal-alignment: center;
+                text: "\{brand}\{spool-display.spool-record.material-type}\{material-subtype}\{color-name}";
+            }
+
+            LabeledInfo {
+                vertical-stretch: 1;
+                label: "Note:";
+                text: spool-display.spool-record.note;
+            }
+
+            LabeledInfo {
+                vertical-stretch: 1;
+                label: "In Slicer:";
+                text: spool-display.slicer-filament-name;
+            }
+
+            HorizontalLayout {
+                vertical-stretch: 1;
+                alignment: space-between;
+                LabeledInfo {
+                    horizontal-stretch: 1;
+                    label: "Color:";
+                    text: "\{spool-display.spool-record.color-code}";
+                }
+
+                LabeledInfo {
+                    label: "Temps: ";
+                    text: "\{spool-display.temp-min}°C - \{spool-display.temp-max}°C";
+                }
+            }
+
+            VerticalLayout {
+                vertical-stretch: 1;
+                LabeledInfo {
+                    label: "PA(K):";
+                    text: spool-display.pa-line1;
+                }
+
+                LabeledInfo {
+                    label: "";
+                    text: spool-display.pa-line2;
+                }
+            }
+
+            LabeledInfo {
+                vertical-stretch: 1;
+                property <string> core: spool-display.spool-record.weight-core > 0 ? "\{spool-display.spool-record.weight-core}g" : "—";
+                property <string> new: spool-display.spool-record.weight-new > 0 ? "\{spool-display.spool-record.weight-new}g" : "—";
+                property <string> advertised: spool-display.spool-record.weight-advertised <= 0 ? "—" : ((spool-display.spool-record.weight-advertised > 500) && (Math.mod(spool-display.spool-record.weight-advertised,500)) == 0) ? "\{spool-display.spool-record.weight-advertised / 1000}kg" : "\{spool-display.spool-record.weight-advertised}g";
+                label: "Weights:";
+                text: "Label: \{advertised} / Core: \{core} / New: \{new}";
+            }
+        }
+    }
+}

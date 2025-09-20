@@ -19,9 +19,12 @@ export component MyButton inherits Rectangle {
     in property <length> text-padding;
     in property <bool> enabled: true;
     in-out property <bool> pushed: false;
+    in property <color> pushed-background: lightgreen;
+    in property <color> released-background: white;
+    in property <color> text-color: black; 
     in property <TextHorizontalAlignment> horizontal-alignment: center;
     callback clicked;
-    background: (type == ButtonType.Standard) ? (enabled ? @linear-gradient(20deg, #3559E0 0%, #c2cdf6 100%) : @linear-gradient(20deg, #5C5C5C 0%, #CFCFCF 100%)) : ((enabled && area.pressed) || pushed ? green : white);
+    background: (type == ButtonType.Standard) ? (enabled ? @linear-gradient(20deg, #3559E0 0%, #c2cdf6 100%) : @linear-gradient(20deg, #5C5C5C 0%, #CFCFCF 100%)) : ((enabled && area.pressed) || pushed ? pushed-background : released-background);
     Text {
         x: text-padding;
         width: parent.width - text-padding * 2;
@@ -30,7 +33,7 @@ export component MyButton inherits Rectangle {
         font-size: 20px;
         font-weight: 400 + (enabled && area.pressed && type == ButtonType.Standard ? 500 : 0);
         wrap: word-wrap;
-        color: enabled ? black : #666666;
+        color: enabled ? text-color : #666666;
     }
 
     area := TouchArea {
@@ -524,6 +527,7 @@ export component HorizontalSelector inherits Window {
 //         }
 //     }
 // }
+
 export component WizardButtons inherits HorizontalLayout {
     callback next-clicked;
     callback back-clicked;

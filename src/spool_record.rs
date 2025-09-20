@@ -30,7 +30,8 @@ pub struct SpoolRecord {
     pub weight_advertised: Option<i32>, // 4
     #[serde(deserialize_with = "deserialize_optional")]
     pub weight_core: Option<i32>, // 4
-    #[serde(deserialize_with = "deserialize_optional")] pub weight_new: Option<i32>, // 4
+    #[serde(deserialize_with = "deserialize_optional")]
+    pub weight_new: Option<i32>, // 4
     #[serde(deserialize_with = "deserialize_optional")]
     pub weight_current: Option<i32>, // 4
     #[serde(default)]

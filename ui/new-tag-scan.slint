@@ -1,9 +1,9 @@
 import { MyText, MyButton, ButtonType, WizardButtons, Title } from "framework/widgets.slint";
 import { NumPad } from "numpad.slint";
 import { AppBackend, AppState, ControlState,FilamentInfoMode, NewTagScanPage, NewTagOperation, SpoolScaleState } from "app.slint";
-import { FilamentInfo  } from "filament-info.slint";
 import { Utils } from "utils.slint";
 import { ScaleWeightDisplay } from "app-widgets.slint";
+import { SpoolDisplay } from "spool-display.slint";
 
 component OperationSelectionStep inherits Rectangle {
     callback next-clicked;
@@ -91,7 +91,7 @@ component SpoolSelectStep inherits Rectangle {
                 property <string> error: "";
                 display-postfix: "";
                 ok-clicked => {
-                    error = AppBackend.fill-encode-request-from-spool-id(num-pad.number);
+                    error = AppBackend.can-link-spool-to-tag(num-pad.number);
                     if error == "" {
                         wiz-buttons.next-enabled = true;
                     } else {
@@ -127,9 +127,9 @@ component SpoolDisplayStep inherits Rectangle {
     in-out property <string> cancel-text: "";
     in-out property <string> next-text: "";
     VerticalLayout {
-        FilamentInfo {
-            height: 320px - 56px;
-            mode: FilamentInfoMode.Wizard;
+        SpoolDisplay {
+           show-title: true;
+           spool-display: AppBackend.get-spool-record-display(AppState.new-tag-scan-spool-id);
         }
 
         WizardButtons {

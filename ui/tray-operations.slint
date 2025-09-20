@@ -1,19 +1,62 @@
 import { MyText, MyButton, ButtonType, WizardButtons, Title } from "framework/widgets.slint";
-import { AppBackend, AppState, ControlState, SpoolStagingState, FilamentInfoMode, SpoolScaleState, UiFilamentState } from "app.slint";
+import { AppBackend, AppState, ControlState, SpoolStagingState, FilamentInfoMode, SpoolScaleState, UiFilamentState, UiSpoolRecordDisplay, UiTray } from "app.slint";
 import { FilamentInfo } from "filament-info.slint";
+import { SpoolDisplay } from "spool-display.slint";
+import { SlotDisplay } from "slot-display.slint";
+import { Utils } from "utils.slint";
 
+
+enum TrayDisplayTab {
+    Slot,
+    Spool
+}
 
 component TrayDisplayStep inherits Rectangle {
     callback more-clicked();
-    width: 480px;
-    height: 320px;
+    property <TrayDisplayTab> tab;
+    in property <string> spool-id;
+    in property <int> tray-index;
+    property <UiSpoolRecordDisplay> spool-display: AppBackend.get-spool-record-display(spool-id);
     VerticalLayout {
-        FilamentInfo {
-            height: 320px - 56px;
-            mode: FilamentInfoMode.Wizard;
+        HorizontalLayout {
+            vertical-stretch: 0;
+            height: 40px;
+            MyButton {
+                type: ButtonType.RadioButton;
+                text: "Slot Information";
+                pushed-background: AppState.trays-state[tray-index].filament.color;
+                text-color: Utils.contrasting_color(self.background);
+                pushed: root.tab == TrayDisplayTab.Slot;
+                pressed => {
+                    root.tab = TrayDisplayTab.Slot
+                }
+            }
+
+            if spool-id != "": MyButton {
+                type: ButtonType.RadioButton;
+                text: "Spool \{spool-id} Information";
+                pushed: tab == TrayDisplayTab.Spool;
+                pushed-background: root.spool-display.color;
+                text-color: Utils.contrasting_color(self.background);
+                pressed => {
+                    root.tab = TrayDisplayTab.Spool
+                }
+            }
+        }
+
+        if root.tab == TrayDisplayTab.Spool: SpoolDisplay { 
+          vertical-stretch: 1;
+          show-title: false;
+          spool-display: root.spool-display;
+        }
+        if root.tab == TrayDisplayTab.Slot: SlotDisplay { 
+          vertical-stretch: 1;
+          slot-index: root.tray-index;
         }
 
         HorizontalLayout {
+            vertical-stretch: 0;
+            height: 56px;
             MyButton {
                 text: "Reset Tray";
             }
@@ -36,8 +79,6 @@ component TrayDisplayStep inherits Rectangle {
 }
 
 component OperationSelectionStep inherits Rectangle {
-    width: 480px;
-    height: 320px;
     background: white;
 
     VerticalLayout {
@@ -64,13 +105,12 @@ component OperationSelectionStep inherits Rectangle {
                 MyButton {
                     text: "Unload Filament";
                     clicked => {
-                        
                     }
                 }
             }
 
             Row {
-              MyButton { // just to have a second row
+                MyButton { // just to have a second row
                   visible: false;
                 }
             }
@@ -97,6 +137,8 @@ enum TrayOperationsPage {
 export component TrayOperations {
     property <TrayOperationsPage> page: AppState.trays-state[AppState.tray-selected-tray-index].filament.state == UiFilamentState.Known ? TrayOperationsPage.SpoolDisplay : TrayOperationsPage.OperationSelection;
     if page == TrayOperationsPage.SpoolDisplay: TrayDisplayStep {
+        spool-id: AppState.trays-state[AppState.tray-selected-tray-index].spool_rec_id;
+        tray-index: AppState.tray-selected-tray-index;
         more-clicked => {
             page = TrayOperationsPage.OperationSelection;
         }

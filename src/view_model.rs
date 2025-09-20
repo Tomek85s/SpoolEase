@@ -31,7 +31,7 @@ use framework::{
     terminal::{self, term_mut, TerminalObserver},
 };
 
-use crate::app::EncodeRequest;
+use crate::app::{EncodeRequest, UiSlotDisplay, UiSpoolRecord, UiSpoolRecordDisplay};
 use crate::app_config::{BASE_FILAMENTS, FILAMENT_BRAND_NAMES, MATERIALS};
 use crate::bambu::bambu_print::{GcodeAnalysis, PrintProject};
 use crate::bambu::{Filament, KExtruder, KInfo, KNozzleDiameter, KNozzleId, KPrinter, SpoolId, Tray, TrayBits};
@@ -530,7 +530,7 @@ impl ViewModel {
         }
     }
 
-    fn get_filament_info(&self, search_code: &str, material: &str) -> Option<(bool, String, u32, u32)> {
+    fn get_filament_info(&self, search_code: &str, material: Option<&str>) -> Option<(bool, String, u32, u32)> {
         let app_config_borrow = self.app_config.borrow();
         let empty_list = String::new();
         let filament_lists = [BASE_FILAMENTS, app_config_borrow.custom_filaments.as_ref().unwrap_or(&empty_list)];
@@ -554,40 +554,42 @@ impl ViewModel {
         }
         // here it means not found the slicer filament, so resorting to material type
 
-        let mut material_code = "";
-        let mut found = false;
-        for (line_index, material_line) in MATERIALS.lines().enumerate() {
-            if line_index == 0 {
-                continue;
-            } // skip title line
-            let mut split = material_line.split(',');
-            if let Some(list_material) = split.next() {
-                if list_material == material {
-                    if let (Some(filament_id), Some(nozzle_temp_low), Some(nozzle_temp_high)) = (split.next(), split.next(), split.next()) {
-                        if let (Ok(_wrong_nozzle_temp_low), Ok(_wrong_nozzle_temp_high)) =
-                            (nozzle_temp_low.parse::<u32>(), nozzle_temp_high.parse::<u32>())
-                        {
-                            material_code = filament_id;
-                            found = true;
-                            break;
+        if let Some(material) = material {
+            let mut material_code = "";
+            let mut found = false;
+            for (line_index, material_line) in MATERIALS.lines().enumerate() {
+                if line_index == 0 {
+                    continue;
+                } // skip title line
+                let mut split = material_line.split(',');
+                if let Some(list_material) = split.next() {
+                    if list_material == material {
+                        if let (Some(filament_id), Some(nozzle_temp_low), Some(nozzle_temp_high)) = (split.next(), split.next(), split.next()) {
+                            if let (Ok(_wrong_nozzle_temp_low), Ok(_wrong_nozzle_temp_high)) =
+                                (nozzle_temp_low.parse::<u32>(), nozzle_temp_high.parse::<u32>())
+                            {
+                                material_code = filament_id;
+                                found = true;
+                                break;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if found {
-            for line in BASE_FILAMENTS.lines() {
-                let mut split = line.split(',');
-                if let (Some(code), Some(name), Some(nozzle_temp_low), Some(nozzle_temp_high)) =
-                    (split.next(), split.next(), split.next(), split.next())
-                {
-                    if code == material_code {
-                        let name = decode_csv_field(name);
-                        let nozzle_temp_low = nozzle_temp_low.parse::<u32>().unwrap_or_default();
-                        let nozzle_temp_high = nozzle_temp_high.parse::<u32>().unwrap_or_default();
-                        let base = true;
-                        return Some((base, name, nozzle_temp_low, nozzle_temp_high));
+            if found {
+                for line in BASE_FILAMENTS.lines() {
+                    let mut split = line.split(',');
+                    if let (Some(code), Some(name), Some(nozzle_temp_low), Some(nozzle_temp_high)) =
+                        (split.next(), split.next(), split.next(), split.next())
+                    {
+                        if code == material_code {
+                            let name = decode_csv_field(name);
+                            let nozzle_temp_low = nozzle_temp_low.parse::<u32>().unwrap_or_default();
+                            let nozzle_temp_high = nozzle_temp_high.parse::<u32>().unwrap_or_default();
+                            let base = true;
+                            return Some((base, name, nozzle_temp_low, nozzle_temp_high));
+                        }
                     }
                 }
             }
@@ -615,7 +617,9 @@ impl ViewModel {
                 "Printer disconnected".to_shared_string(),
             );
         } else if let Some(full_spool_rec) = filament_staging.full_spool_rec() {
-            if let Some(filament_info) = self.get_filament_info(&full_spool_rec.spool_rec.slicer_filament, &full_spool_rec.spool_rec.material_type) {
+            if let Some(filament_info) =
+                self.get_filament_info(&full_spool_rec.spool_rec.slicer_filament, Some(&full_spool_rec.spool_rec.material_type))
+            {
                 bambu_printer.set_tray_filament(tray_id, full_spool_rec, filament_info.2, filament_info.3);
                 filament_staging.clear();
                 ui.unwrap().global::<crate::app::AppState>().invoke_empty_spool_staging();
@@ -708,6 +712,181 @@ impl ViewModel {
             .on_calc_encode_request_display(move |mode| {
                 moved_view_model.borrow().calc_encode_request_display(mode);
             });
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
+            .on_get_spool_record_display(move |spool_id| moved_view_model.borrow().ui_get_spool_record_display(&spool_id));
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
+            .on_get_slot_display(move |tray_id| moved_view_model.borrow().ui_get_slot_display(tray_id));
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
+            .on_can_link_spool_to_tag(move |spool_id| moved_view_model.borrow().ui_can_link_spool_to_tag(spool_id.as_str()));
+    }
+
+    fn ui_can_link_spool_to_tag(&self, id: &str) -> SharedString {
+        if let Some(spool_rec) = self.store.get_spool_by_id(id) {
+            if spool_rec.tag_id.is_empty() || spool_rec.tag_id.starts_with("-") {
+                SharedString::new()
+            } else {
+                SharedString::from("Spool Is Tagged")
+            }
+        } else {
+            SharedString::from("Spool Not Found")
+        }
+    }
+
+    fn ui_get_slot_display(&self, tray_id: i32) -> UiSlotDisplay {
+        let printer_borrow = self.bambu_printer_model.borrow();
+        let tray = printer_borrow.get_any_tray(tray_id as usize);
+        let color_code = if let Filament::Known(filament) = &tray.filament {
+            filament.tray_color.to_shared_string()
+        } else {
+            SharedString::new()
+        };
+        let (slicer_name, temp_min, temp_max, material) = if let Filament::Known(filament) = &tray.filament {
+            if let Some(filament_info) = self.get_filament_info(&filament.tray_info_idx, Some(&filament.tray_type)) {
+                (
+                    filament_info.1.into(),
+                    filament_info.2 as i32,
+                    filament_info.3 as i32,
+                    filament.tray_type.as_str(),
+                )
+            } else {
+                (SharedString::new(), 0, 0, filament.tray_type.as_str())
+            }
+        } else {
+            (SharedString::new(), 0, 0, "")
+        };
+
+        let color_name = if color_code.len() >= 6 {
+            let color = u32::from_str_radix(&color_code[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+            let color = slint::Color::from_argb_encoded(color);
+            let color_name_info = get_color_name(color.red(), color.green(), color.blue());
+            color_name_info.0
+        } else {
+            ""
+        };
+
+        let brand = if !slicer_name.is_empty() {
+            get_brand_from_text(slicer_name.as_str()).unwrap_or("")
+        } else {
+            ""
+        };
+        let filament_title = format!("{brand} {material} {color_name}").trim().to_shared_string();
+        let available_in_spool = self.weight_left(tray).unwrap_or_default();
+        
+        let pa = match tray.cali_idx {
+            Some(-1) | None => {
+                slint::format!("({})",tray.k_from_tray.unwrap_or(0.2))
+            }
+            Some(cali_idx) => {
+                let (k_value, profile_name) = printer_borrow.calibrations.iter().find(|c| c.cali_idx == cali_idx).map_or(("0.2", ""), |c| (c.k_value.as_str(), c.name.as_str()));
+                slint::format!("{k_value}, {profile_name}")
+            }
+        };
+
+        UiSlotDisplay {
+            available_in_spool,
+            color_code,
+            consumed_since_loaded: tray.meta_info.consumed_since_load,
+            filament_title,
+            slicer_name,
+            temp_max,
+            temp_min,
+            pa,
+        }
+    }
+
+    fn ui_get_spool_record_display(&self, ui_spool_id: &SharedString) -> UiSpoolRecordDisplay {
+        let spool_rec = self.store.get_spool_by_id(ui_spool_id.as_str());
+        if spool_rec.is_none() {
+            return UiSpoolRecordDisplay::default();
+        }
+        let spool_rec = spool_rec.unwrap();
+        let record = UiSpoolRecord {
+            added_full: spool_rec.added_full.unwrap_or_default(),
+            // added_time: todo!(),
+            brand: spool_rec.brand.into(),
+            color_code: spool_rec.color_code.into(),
+            color_name: spool_rec.color_name.into(),
+            consumed_since_add: spool_rec.consumed_since_add,
+            consumed_since_weight: spool_rec.consumed_since_weight,
+            // encode_time: todo!(),
+            ext_has_k: spool_rec.ext_has_k,
+            id: spool_rec.id.into(),
+            material_subtype: spool_rec.material_type.into(),
+            material_type: spool_rec.material_subtype.into(),
+            note: spool_rec.note.into(),
+            slicer_filament: spool_rec.slicer_filament.into(),
+            tag_id: spool_rec.tag_id.into(),
+            weight_advertised: spool_rec.weight_advertised.unwrap_or_default(),
+            weight_core: spool_rec.weight_advertised.unwrap_or_default(),
+            weight_current: spool_rec.weight_current.unwrap_or_default(),
+            weight_new: spool_rec.weight_new.unwrap_or_default(),
+        };
+
+        // for now, on purpose, not filling in fields that aren't in the tag, to show the real tag information
+        let filament_info = self.get_filament_info(&record.slicer_filament, None);
+        let slicer_filament_name = filament_info.as_ref().map_or(SharedString::new(), |fi| fi.1.to_shared_string());
+        let temp_min = filament_info.as_ref().map_or_else(|| 0, |fi| fi.2) as i32;
+        let temp_max = filament_info.as_ref().map_or_else(|| 0, |fi| fi.3) as i32;
+
+        // For now not filling in for Spool data that's not explicitly in the record
+        // if record.color_name.is_empty() {
+        //     record.color_name = if record.color_code.len() >= 6 {
+        //         let color = u32::from_str_radix(&record.color_code[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+        //         let color = slint::Color::from_argb_encoded(color);
+        //         let color_name_info = get_color_name(color.red(), color.green(), color.blue());
+        //         let color_name = color_name_info.0.to_shared_string();
+        //         format!("({})", color_name).into()
+        //     } else {
+        //         "".into()
+        //     }
+        // }
+        // if record.brand.is_empty() {
+        //     record.brand = if let Some((_, slicer_name, _, _)) = &filament_info {
+        //         if let Some(brand_name) = get_brand_from_text(slicer_name) {
+        //             brand_name.into()
+        //         } else {
+        //             "".into()
+        //         }
+        //     } else {
+        //         "".into()
+        //     }
+        // }
+
+        // Could also fill in slicer filament name when not filled in based on material, but don't want to for now
+        // let filament_info = self.get_filament_info(&record.slicer_filament, Some(&record.material_type));
+        //
+        // if slicer_filament_name.is_empty() {
+        //    slicer_filament_name = filament_info.map_or(SharedString::new(), |fi| fi.1.into());
+        // }
+
+        let color = if record.color_code.len() >= 6 {
+            let color = u32::from_str_radix(&record.color_code[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+            slint::Color::from_argb_encoded(color)
+        } else {
+            slint::Color::default()
+        };
+
+        UiSpoolRecordDisplay {
+            pa_line1: (if record.ext_has_k { "Configured" } else { "Not Configured" }).to_shared_string(),
+            pa_line2: SharedString::new(),
+            slicer_filament_name,
+            spool_record: record,
+            temp_min,
+            temp_max,
+            color,
+        }
     }
 
     fn calc_encode_request_display(&self, mode: crate::app::FilamentInfoMode) {
@@ -817,7 +996,7 @@ impl ViewModel {
 
         let display_spool_rec = &display_full_spool_rec.spool_rec;
 
-        let filament_info = self.get_filament_info(&display_spool_rec.slicer_filament, &encode_request_display.filament_type);
+        let filament_info = self.get_filament_info(&display_spool_rec.slicer_filament, Some(&encode_request_display.filament_type));
 
         encode_request.brand = if display_spool_rec.brand.is_empty() {
             if let Some((_, slicer_name, _, _)) = &filament_info {
@@ -987,24 +1166,30 @@ impl ViewModel {
     }
 
     fn weight_display(&self, tray: &Tray) -> SharedString {
-        let mut res = SharedString::new();
-        if tray.meta_info.consumed_since_load != 0.0 {
-            res = slint::format!("-{:.1}g", tray.meta_info.consumed_since_load);
+        if let Some(weight_left) = self.weight_left(tray) {
+            slint::format!("{:.1}g", weight_left)
+        } else if tray.meta_info.consumed_since_load != 0.0 {
+            slint::format!("-{:.1}g", tray.meta_info.consumed_since_load)
+        } else {
+            SharedString::new()
         }
+    }
+
+    fn weight_left(&self, tray: &Tray) -> Option<f32> {
         if let Some(spool_id) = &tray.meta_info.spool_id {
             if let Some(spool) = self.store.get_spool_by_id(spool_id) {
                 if let (Some(weight_core), Some(weight_current)) = (spool.weight_core, spool.weight_current) {
                     let realtime_weight = (weight_current - weight_core) as f32 - tray.meta_info.consumed_since_weight;
-                    res = slint::format!("{:.1}g", realtime_weight);
+                    return Some(realtime_weight);
                 } else if let (Some(weight_current), Some(weight_new), Some(weight_advertised)) =
                     (spool.weight_current, spool.weight_new, spool.weight_advertised)
                 {
                     let realtime_weight = (weight_current - (weight_new - weight_advertised)) as f32 - tray.meta_info.consumed_since_weight;
-                    res = slint::format!("{:.1}g", realtime_weight);
+                    return Some(realtime_weight);
                 }
             }
         }
-        res
+        None
     }
 
     fn try_dispatch_next_gcode_job(&mut self) {

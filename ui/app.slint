@@ -37,6 +37,49 @@ export struct UiSpoolInfo {
   weight-core: int,
 }
 
+export struct UiSpoolRecord {
+    id: string,
+    tag_id: string,
+    material-type: string,
+    material-subtype: string,
+    color-name: string,
+    color-code: string,
+    note: string,
+    brand: string,
+    weight-advertised: int,
+    weight-core: int,
+    weight-new: int,
+    weight-current: int,
+    slicer-filament: string,
+    // added-time: int,
+    // encode-time: int,
+    added-full: bool,
+    consumed-since-add: float,
+    consumed-since-weight: float,
+    ext-has-k: bool,
+}
+
+export struct UiSpoolRecordDisplay {
+  spool_record: UiSpoolRecord,
+  slicer-filament-name: string,
+  color: color,
+  temp-min: int,
+  temp-max: int,
+  pa-line1: string,
+  pa-line2: string,
+}
+
+export struct UiSlotDisplay {
+  filament-title: string,
+  slicer-name: string,
+  color-code: string,
+  temp-min: int,
+  temp-max: int,
+  pa: string,
+  consumed-since-loaded: float,
+  available-in-spool: float,
+}
+
 export struct EncodeRequest { // EncodeRequest is actually used for FilamentInfo - for Encode as well as View
   // autofilled
   id: string,
@@ -136,6 +179,9 @@ export global AppBackend {
     callback link_tag_to_spool_id(tag_id: string, spool-id: string, final-step: bool);
     callback set-spool-weight(spool-id: string, weight: int, unused: bool, final-step: bool);
     pure callback recently_added_spool_id_if_untagged() -> string;
+    pure callback get-spool-record-display(spool-id: string) -> UiSpoolRecordDisplay;
+    pure callback get-slot-display(tray-id: int) -> UiSlotDisplay;
+    callback can-link-spool-to-tag(id: string) -> string; // empty if untagged, error text if not
 }
 
 export enum NewTagScanPage {
@@ -153,6 +199,7 @@ export enum NewTagOperation {
 }
 
 export global AppState {
+    in-out property <[UiTray]> trays-state: self.empty-trays-state();
     in-out property <bool> select-printer: false;
     in-out property <ControlState> control-state: ControlState.Booting;
     changed control-state => {
@@ -222,6 +269,18 @@ export global AppState {
     in-out property <bool> highlight-tray-flash: false;
     out property <int> highlight-tray-counter-length: 20;
     in-out property <int> highlight-tray-counter: highlight-tray-counter-length;
+
+    public pure function ui-tray-spool-state-name(state: UiTrayState) -> string {
+        if state == UiTrayState.Unknown { return "Unknown"; }
+        if state == UiTrayState.Empty { return "Slot is Empty"; }
+        if state == UiTrayState.Spool { return "Spool Placed"; }
+        if state == UiTrayState.Reading { return "Reading Filament Information"; }
+        if state == UiTrayState.Ready { return "Spool in Slot, Idle"; }
+        if state == UiTrayState.Loading { return "Retracting From Extruder"; }
+        if state == UiTrayState.Unloading { return "Loading Into Extruder"; }
+        if state == UiTrayState.Loaded { return "In Extruder"; }
+        return "-";
+    }
 
     public function start-highlight-tray(tray-id: int) {
         self.highlight-tray = tray-id;
@@ -488,8 +547,6 @@ export global AppState {
 
     public function emulated-tag-scanned() {
     }
-
-    in-out property <[UiTray]> trays-state: self.empty-trays-state();
 
     public function set-printers-info(available-printers: [string], default_printer: string) {
         self.available-printers = available-printers;
