@@ -520,6 +520,12 @@ impl ViewModel {
             .unwrap()
             .global::<crate::app::AppBackend>()
             .on_erase_tag(move |tag_id| moved_view_model.borrow().ui_erase_tag(tag_id.as_str()));
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
+            .on_erase_tag_by_spool_id(move |spool_id| moved_view_model.borrow().ui_erase_tag_by_spool_id(spool_id.as_str()));
     }
 
     fn perform_select_printer(
@@ -725,6 +731,19 @@ impl ViewModel {
             .on_set_staging_to_tray(move |tray_id: i32| {
                 Self::set_staging_to_tray(&moved_view_model, &moved_filament_staging, &moved_bambu_printer, &moved_ui, tray_id);
             });
+    }
+
+    fn ui_erase_tag_by_spool_id(&self, spool_id: &str) {
+        if let Some(spool_rec) = self.store.get_spool_by_id(spool_id) {
+            if spool_rec.has_valid_tag_id() {
+                self.ui_erase_tag(&spool_rec.tag_id);
+                return;
+            }
+        }
+        error!("Received to erase spool's tag with invalid tag id");
+        let ui = self.ui_weak.unwrap();
+        let ui_app_state: crate::app::AppState<'_> = ui.global::<crate::app::AppState>();
+        ui_app_state.invoke_show_message_box("Erase Tag Notice".into(), slint::format!("No Tag-Id for Spool {}", spool_id), SharedString::new(), crate::app::StatusType::Error, -1); 
     }
 
     fn ui_erase_tag(&self, tag_id: &str) {

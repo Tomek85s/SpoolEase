@@ -102,6 +102,16 @@ component OperationSelectionStep inherits Rectangle {
 
                 MyButton {
                     enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
+                    text: "Erase Tag";
+                    clicked => {
+                      AppBackend.erase-tag-by-spool-id(AppState.spool-staging-info.id);
+                      AppState.control-state = ControlState.Ready;
+                    }
+                }
+            }
+            Row {
+                MyButton {
+                    enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
                     text: "Mark as Dried";
                 }
             }

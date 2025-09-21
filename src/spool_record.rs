@@ -127,6 +127,9 @@ impl SpoolRecord {
         let slicer_filament_code_part = part_val("FI", &self.slicer_filament);
         Some(format!("{TAG_URL_PREFIX_V2}?TG={tag_id}&ID={id}{encode_time_part}&M={material}{material_subtype_part}{brand_part}{weight_advertised_part}{weight_core_part}{weight_new_part}{slicer_filament_code_part}"))
     }
+    pub fn has_valid_tag_id(&self) -> bool {
+        !self.tag_id.is_empty() && !self.tag_id.starts_with('-')
+    }
 }
 
 pub fn part_opt<T: Default+PartialEq+core::fmt::Display>(prefix: &str, opt: &Option<T>) -> String {
