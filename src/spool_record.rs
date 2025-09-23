@@ -1,12 +1,16 @@
-use alloc::{format, string::{String, ToString}};
+use crate::{
+    bambu::{KInfo, KNozzleId},
+    csvdb::CsvDbId,
+    types::FilamentSupInfo,
+};
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 use serde::{Deserialize, Serialize};
 use shared::utils::{
     deserialize_bool_yn_empty_n, deserialize_f32_base64, deserialize_optional, deserialize_optional_bool_yn, serialize_bool_yn, serialize_f32_base64,
     serialize_optional_bool_yn,
-};
-use crate::{
-    bambu::{KInfo, KNozzleId},
-    csvdb::CsvDbId,
 };
 
 // TODO: think if to change it to get the spoolRecord from store (and it will hold Rc to store)
@@ -102,40 +106,59 @@ impl CsvDbId for SpoolRecord {
 }
 
 const TAG_URL_PREFIX_V2: &str = "https://info.filament3d.org/V2/";
-        // Some(format!("{FILAMENT_URL_PREFIX}V1?ID={TAG_PLACEHOLDER}{encode_time_part}{material_part}
-        // {filament_subtype_part}{color_part}{color_name_part}{brand_part}{advertised_weight_part}{weight_core_part}{weight_new_part}{nozzle_temp_min_part}{nozzle_temp_max_part}{note_part}{tray_info_idx_part}"))
-// TODO:    
+// Some(format!("{FILAMENT_URL_PREFIX}V1?ID={TAG_PLACEHOLDER}{encode_time_part}{material_part}
+// {filament_subtype_part}{color_part}{color_name_part}{brand_part}{advertised_weight_part}{weight_core_part}{weight_new_part}{nozzle_temp_min_part}{nozzle_temp_max_part}{note_part}{tray_info_idx_part}"))
+// TODO:
 // 1. Add slicer_filament_name - derive from slicer,mfilament_code or from material_type if slicer not filled in, use get_filament_info for that
-// 2. Add temperatures - use get_filament_info for that 
+// 2. X Add temperatures - use get_filament_info for that
 // 3. Add note - and fully url encode it
 // 4. ? Add added time
-
+// 5. {note_part}{tray_info_idx_part}"))
+// 6. note (N)
+// 8. slicner name (SN)
+// 9. DA
 impl SpoolRecord {
-    pub fn to_tag_descriptor_v2(&self) -> Option<String> {
+    pub fn to_tag_descriptor_v2(&self, filament_sup_info: &Option<FilamentSupInfo>) -> Option<String> {
+        // Note: This function relies on tag_id to be here! (removes the & from the standard function, will panic if no tag_id)
         if self.id.is_empty() || self.tag_id.is_empty() || self.material_type.is_empty() || self.color_code.is_empty() {
             return None;
         }
         let encode_time_part = part_opt("DE", &self.encode_time);
-        let id = &self.id;
-        let tag_id = &self.tag_id;
+        let added_time_part = part_opt("DA", &self.added_time);
+        let mut tag_id_part = part_val("TG", &self.tag_id);
+        tag_id_part.drain(..1); // remove the "&"
+        let id_part = part_val("ID", &self.id);
         let material = &self.material_type;
         let material_subtype_part = part_val("MS", &self.material_subtype);
         let brand_part = part_val("B", &self.brand);
         let weight_advertised_part = part_opt("WA", &self.weight_advertised);
         let weight_core_part = part_opt("WC", &self.weight_core);
         let weight_new_part = part_opt("WN", &self.weight_new);
-        let slicer_filament_code_part = part_val("FI", &self.slicer_filament);
-        Some(format!("{TAG_URL_PREFIX_V2}?TG={tag_id}&ID={id}{encode_time_part}&M={material}{material_subtype_part}{brand_part}{weight_advertised_part}{weight_core_part}{weight_new_part}{slicer_filament_code_part}"))
+        let slicer_filament_code_part = part_val("SC", &self.slicer_filament);
+        let note_part = part_val("N", &self.note);
+        let slicer_filament_name = filament_sup_info.as_ref().map_or("", |fsi| &fsi.slicer_name);
+        let slicer_filament_name_part = part_val("SN", &slicer_filament_name.to_string());
+        Some(format!("{TAG_URL_PREFIX_V2}?{tag_id_part}{id_part}{encode_time_part}{added_time_part}&M={material}{material_subtype_part}{brand_part}{weight_advertised_part}{weight_core_part}{weight_new_part}{slicer_filament_code_part}{slicer_filament_name_part}{note_part}"))
     }
     pub fn has_valid_tag_id(&self) -> bool {
         !self.tag_id.is_empty() && !self.tag_id.starts_with('-')
     }
 }
 
-pub fn part_opt<T: Default+PartialEq+core::fmt::Display>(prefix: &str, opt: &Option<T>) -> String {
-    if matches!(opt, Some(v) if *v!= T::default()) { format!("&{prefix}={}", opt.as_ref().unwrap()) } else {"".to_string()}
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+pub fn part_opt<T: Default + PartialEq + core::fmt::Display>(prefix: &str, opt: &Option<T>) -> String {
+    match opt {
+        Some(v) => part_val(prefix, v),
+        None => String::new(),
+    }
 }
 
-pub fn part_val<T: Default+PartialEq+core::fmt::Display>(prefix: &str, val: &T) -> String {
-    if *val != T::default() { format!("&{prefix}={}", val) } else {"".to_string()}
+pub fn part_val<T: Default + PartialEq + core::fmt::Display>(prefix: &str, val: &T) -> String {
+    if *val != T::default() {
+        let value = val.to_string();
+        let url_encoded_value = utf8_percent_encode(&value, NON_ALPHANUMERIC).to_string();
+        format!("&{prefix}={url_encoded_value}")
+    } else {
+        "".to_string()
+    }
 }
