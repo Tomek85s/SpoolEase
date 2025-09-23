@@ -3,7 +3,6 @@ import { AppBackend, AppState, ControlState, UiTray, UiSpoolRecord, UiSpoolRecor
 import { Utils } from "utils.slint";
 import { FrameworkState } from "framework/framework.slint";
 import { LabeledText } from "app-widgets.slint";
-// import { SelectIfNewSpool } from "core-weight.slint";
 
 
 component LabeledInfo inherits LabeledText {
@@ -36,7 +35,7 @@ export component SpoolDisplay inherits Rectangle {
         alignment: stretch;
         if show-title: Title {
             vertical-stretch: 0;
-            background: AppState.spool-staging-info.color;
+            background: spool-display.color;
             text-color: Utils.contrasting_color(self.background);
             text: "Spool \{spool-display.spool-record.id} Information";
         }
