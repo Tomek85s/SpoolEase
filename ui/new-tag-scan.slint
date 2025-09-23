@@ -6,12 +6,9 @@ import { ScaleWeightDisplay } from "app-widgets.slint";
 import { SpoolDisplay } from "spool-display.slint";
 
 component OperationSelectionStep inherits Rectangle {
-    callback next-clicked;
-    callback cancel-clicked;
     background: white;
-    property <NewTagOperation> selected-operation: None;
     function pressed(operation: NewTagOperation) {
-        selected-operation = selected-operation == operation ? NewTagOperation.None : operation;
+        AppState.new-tag-operation = AppState.new-tag-operation == operation ? NewTagOperation.None : operation;
     }
 
     VerticalLayout {
@@ -36,7 +33,7 @@ component OperationSelectionStep inherits Rectangle {
             VerticalLayout {
                 b1 := MyButton {
                     type: ButtonType.RadioButton;
-                    pushed: selected-operation == NewTagOperation.LinkTagToSpoolId;
+                    pushed: AppState.new-tag-operation == NewTagOperation.LinkTagToSpoolId;
                     height: 56px;
                     text: "Link Tag to an Untagged Spool";
                     pressed => {
@@ -46,7 +43,7 @@ component OperationSelectionStep inherits Rectangle {
 
                 b2 := MyButton {
                     visible: AppBackend.recently_added_spool_id_if_untagged() != "";
-                    pushed: selected-operation == NewTagOperation.LinkTagToRecentlyAddedSpool;
+                    pushed: AppState.new-tag-operation == NewTagOperation.LinkTagToRecentlyAddedSpool;
                     type: ButtonType.RadioButton;
                     height: 56px;
                     text: "Link Tag to Recently Added Spool (ID: \{AppBackend.recently_added_spool_id_if_untagged()})";
@@ -58,26 +55,26 @@ component OperationSelectionStep inherits Rectangle {
         }
 
         WizardButtons {
-            next-enabled: selected-operation != NewTagOperation.None;
+            next-enabled: AppState.new-tag-operation != NewTagOperation.None;
             next-clicked => {
-                AppState.new-tag-operation = selected-operation;
-                root.next-clicked();
+                // AppState.new-tag-operation = selected-operation;
+              if AppState.new-tag-operation == NewTagOperation.LinkTagToSpoolId {
+                    AppState.new-tag-scan-page = NewTagScanPage.SpoolSelect;
+                } else {
+                    AppState.new-tag-scan-spool-id = AppBackend.recently_added_spool_id_if_untagged();
+                    AppState.new-tag-scan-page = NewTagScanPage.LinkSpoolDisplay;
+                }
             }
             cancel-clicked => {
-                root.cancel-clicked();
+                AppState.control-state = ControlState.Ready;
             }
         }
     }
 }
 
 component SpoolSelectStep inherits Rectangle {
-    height: 320px;
-    width: 480px;
-    callback next-clicked;
-    callback back-clicked;
-    callback cancel-clicked;
     background: white;
-    in-out property <string> spool-id: num-pad.number;
+    in-out property <int> spool-id: num-pad.number;
     VerticalLayout {
         Title {
             text: "Please Select Spool Id to Link";
@@ -85,33 +82,28 @@ component SpoolSelectStep inherits Rectangle {
 
         Rectangle {
             num-pad := NumPad {
-                changed number => {
-                    wiz-buttons.next-enabled = false;
-                }
-                property <string> error: "";
+                number: AppState.new-tag-scan-spool-id-int;
+                ok-visible: false;
                 display-postfix: "";
-                ok-clicked => {
-                    error = AppBackend.can-link-spool-to-tag(num-pad.number);
-                    if error == "" {
-                        wiz-buttons.next-enabled = true;
-                    } else {
-                        num-pad.display-error = error;
-                        wiz-buttons.next-enabled = false;
-                    }
-                }
             }
         }
 
         wiz-buttons := WizardButtons {
             back-enabled: true;
+            next-enabled: true;
             back-clicked => {
-                back-clicked();
+                AppState.new-tag-scan-page = NewTagScanPage.OperationSelect;
             }
             cancel-clicked => {
-                cancel-clicked();
+                AppState.control-state = ControlState.Ready;
             }
             next-clicked => {
-                next-clicked();
+                num-pad.display-error = AppBackend.can-link-spool-to-tag(num-pad.number);
+                if num-pad.display-error == "" {
+                    AppState.new-tag-scan-spool-id = root.spool-id;
+                    AppState.new-tag-scan-spool-id-int = num-pad.number;
+                    AppState.new-tag-scan-page = NewTagScanPage.LinkSpoolDisplay;
+                }
             }
         }
     }
@@ -185,14 +177,9 @@ component V1TagPromptStep inherits Rectangle {
 }
 
 component SpoolDisplayStep inherits Rectangle {
-    callback next-clicked;
-    callback back-clicked;
-    callback cancel-clicked;
-    in-out property <bool> back-enabled: true;
-    in-out property <bool> next-enabled: true;
-    in-out property <bool> cancel-enabled: true;
     in-out property <string> cancel-text: "";
     in-out property <string> next-text: "";
+    property <bool> last-step: !AppState.is-scale-usable-now();
     VerticalLayout {
         SpoolDisplay {
             show-title: true;
@@ -200,27 +187,29 @@ component SpoolDisplayStep inherits Rectangle {
         }
 
         WizardButtons {
-            back-enabled: root.back-enabled;
-            next-enabled: root.next-enabled;
-            cancel-enabled: root.cancel-enabled;
+            back-enabled: true;
+            next-enabled: true;
+            cancel-enabled: true;
             cancel-text: root.cancel-text;
-            next-text: root.next-text;
+            next-text: "✓ Link Tag" + (root.last-step ? "" : " ▶");
             back-clicked => {
-                back-clicked();
-            }
-            cancel-clicked => {
-                cancel-clicked();
+                AppState.new-tag-scan-page = NewTagScanPage.SpoolSelect;
             }
             next-clicked => {
-                next-clicked();
+                self.back-enabled = false;
+                self.next-enabled = false;
+                cancel-text = "Close";
+                // perform action
+                AppBackend.link_tag_to_spool_id(AppState.new-tag-scan-tag-id, AppState.new-tag-scan-spool-id, last-step);
+            }
+            cancel-clicked => {
+                AppState.control-state = ControlState.Ready;
             }
         }
     }
 }
 
 component MeasureWeightPage inherits Rectangle {
-    callback cancel-clicked;
-    callback next-clicked;
     in-out property <bool> success;
     in-out property <string> message;
     in-out property <bool> unused: unused.pushed;
@@ -289,19 +278,18 @@ component MeasureWeightPage inherits Rectangle {
             cancel-enabled: true;
             next-text: "Weight & Finish";
             cancel-clicked => {
-                cancel-clicked();
+                AppState.control-state = ControlState.Ready;
             }
             next-clicked => {
-                next-clicked();
+                AppBackend.set-spool-weight(AppState.new-tag-scan-spool-id, AppState.spool-scale-weight, root.unused, true);
             }
         }
     }
 }
 
 component StatusDisplayPage inherits Rectangle {
-    callback cancel-clicked;
-    in-out property <bool> success;
-    in-out property <string> message;
+    in-out property <bool> success: AppState.new-tag-scan-status == "";
+    in-out property <string> message: self.success ? "Tag Linked to Spool Successfuly" : AppState.new-tag-scan-status;
     VerticalLayout {
         Rectangle {
             background: success ? lightgreen : red;
@@ -317,7 +305,7 @@ component StatusDisplayPage inherits Rectangle {
             cancel-enabled: true;
             cancel-text: "Close";
             cancel-clicked => {
-                cancel-clicked();
+                AppState.control-state = ControlState.Ready;
             }
         }
     }
@@ -327,74 +315,15 @@ export component NewTagScan inherits Rectangle {
     width: 480px;
     height: 320px;
 
-    if AppState.new-tag-scan-page == NewTagScanPage.OperationSelect: oper-select := OperationSelectionStep {
-        visible: AppState.new-tag-scan-page == NewTagScanPage.OperationSelect;
-        next-clicked => {
-            if AppState.new-tag-operation == NewTagOperation.LinkTagToSpoolId {
-                AppState.new-tag-scan-page = NewTagScanPage.SpoolSelect;
-            } else {
-                AppState.new-tag-scan-spool-id = AppBackend.recently_added_spool_id_if_untagged();
-                // AppBackend.fill-encode-request-from-spool-id(AppBackend.recently_added_spool_id_if_untagged());
-                // AppState.encoding-select-spool-id = false;
-                AppState.new-tag-scan-page = NewTagScanPage.LinkSpoolDisplay;
-            }
-        }
-        cancel-clicked => {
-            AppState.control-state = ControlState.Ready;
-        }
-    }
+    if AppState.new-tag-scan-page == NewTagScanPage.OperationSelect: oper-select := OperationSelectionStep { }
 
-    if AppState.new-tag-scan-page == NewTagScanPage.SpoolSelect: spool-select := SpoolSelectStep {
-        visible: AppState.new-tag-scan-page == NewTagScanPage.SpoolSelect;
-        back-clicked => {
-            AppState.new-tag-scan-page = NewTagScanPage.OperationSelect;
-        }
-        next-clicked => {
-            AppState.new-tag-scan-spool-id = self.spool-id;
-            AppState.new-tag-scan-page = NewTagScanPage.LinkSpoolDisplay;
-        }
-        cancel-clicked => {
-            AppState.control-state = ControlState.Ready;
-        }
-    }
+    if AppState.new-tag-scan-page == NewTagScanPage.SpoolSelect: spool-select := SpoolSelectStep { }
 
-    if AppState.new-tag-scan-page == NewTagScanPage.LinkSpoolDisplay: spool-display := SpoolDisplayStep {
-        visible: AppState.new-tag-scan-page == NewTagScanPage.LinkSpoolDisplay;
-        property <bool> last-step: !AppState.is-scale-usable-now();
-        next-text: "✓ Link Tag" + (last-step ? "" : " ▶");
-        back-clicked => {
-            AppState.new-tag-scan-page = NewTagScanPage.SpoolSelect;
-        }
-        next-clicked => {
-            spool-display.back-enabled = false;
-            spool-display.next-enabled = false;
-            spool-display.cancel-text = "Close";
-            // perform action
-            AppBackend.link_tag_to_spool_id(AppState.new-tag-scan-tag-id, AppState.new-tag-scan-spool-id, last-step);
-        }
-        cancel-clicked => {
-            AppState.control-state = ControlState.Ready;
-        }
-    }
+    if AppState.new-tag-scan-page == NewTagScanPage.LinkSpoolDisplay: spool-display := SpoolDisplayStep { }
 
-    if AppState.new-tag-scan-page == NewTagScanPage.MeasureWeight: measure-weight-display := MeasureWeightPage {
-        next-clicked => {
-            AppBackend.set-spool-weight(AppState.new-tag-scan-spool-id, AppState.spool-scale-weight, self.unused, true);
-        }
-        cancel-clicked => {
-            AppState.control-state = ControlState.Ready;
-        }
-    }
+    if AppState.new-tag-scan-page == NewTagScanPage.MeasureWeight: measure-weight-display := MeasureWeightPage { }
 
-    if AppState.new-tag-scan-page == NewTagScanPage.StatusDisplay: status-display := StatusDisplayPage {
-        cancel-clicked => {
-            AppState.new-tag-scan-page = NewTagScanPage.OperationSelect;
-            AppState.new-tag-scan-status = "";
-            AppState.control-state = ControlState.Ready;
-        }
-        success: AppState.new-tag-scan-status == "";
-        message: self.success ? "Tag Linked to Spool Successfuly" : AppState.new-tag-scan-status;
-    }
+    if AppState.new-tag-scan-page == NewTagScanPage.StatusDisplay: status-display := StatusDisplayPage { }
 
     if AppState.new-tag-scan-page == NewTagScanPage.V1TagPrompt: v1-prompt := V1TagPromptStep { }
 }

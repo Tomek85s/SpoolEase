@@ -190,6 +190,7 @@ export global AppState {
     in-out property <string> new-tag-scan-status: ""; // text means error, empty mean ok
     in-out property <NewTagOperation> new-tag-operation: None;
     in-out property <string> new-tag-scan-spool-id: "";
+    in-out property <int> new-tag-scan-spool-id-int: 0;
     in-out property <string> new-tag-scan-v1-tag: "";
 
     // Global state for TraySelected Control-State
@@ -542,6 +543,7 @@ export global AppState {
         self.new-tag-operation = NewTagOperation.None;
         self.new-tag-scan-status = "";
         self.new-tag-scan-spool-id = "";
+        self.new-tag-scan-spool-id-int = 0;
         self.new-tag-scan-tag-id = tag-id;
         self.control-state = ControlState.NewTagScan;
     }
