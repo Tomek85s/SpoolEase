@@ -413,16 +413,20 @@ impl Store {
         db_version: semver::Version,
         current_version: semver::Version,
         view_model: Rc<RefCell<ViewModel>>,
-    ) -> Result<(), StoreError> {
+    ) -> Result<bool, StoreError> {
+        let mut spool_issues = String::new();
         if let Some(spools_db) = self.spools_db.get() {
-            let spool_ids: Vec<_> = {
+            let mut spool_ids: Vec<_> = {
                 let records = spools_db.records.borrow();
                 records.keys().cloned().collect()
             };
-            for spool_id in spool_ids {
-                info!("Upgrading store spool {spool_id}");
+            spool_ids.sort_by_key(|s| s.parse::<u32>().ok());
+            let num_of_spools = spool_ids.len();
+            for (index, spool_id) in spool_ids.iter().enumerate() {
+                info!("Upgrading store spool # {spool_id}, {index} / {num_of_spools}");
+                view_model.borrow().message_box("Store Notice", &format!("Upgrading Spool # {spool_id}"), &format!("{index}/{num_of_spools}"), crate::app::StatusType::Normal , 0);
                 let mut spool_rec_ext = SpoolRecordExt::default();
-                match self.get_spool_ext_by_id(&spool_id).await {
+                match self.get_spool_ext_by_id(spool_id.as_str()).await {
                     Ok(loaded_spool_rec_ext) => {
                         spool_rec_ext = loaded_spool_rec_ext;
                         if let Some(tag_desciptor) = &spool_rec_ext.tag {
@@ -438,30 +442,44 @@ impl Store {
                                 }
                                 Err(err) => {
                                     error!("Error parsing tag descriptor for spool {}, ignoring : {err:?}", spool_id);
+                                    spool_issues.push_str(&format!("Error parsing tag descriptor for spool {spool_id}, ignoring : {err:?}\n"));
                                     // Store anyway, since there were issues with old files that needs to be fixed
                                 }
                             }
                         } else {
                             warn!("No tag descriptor found for spool {}, ignoring", spool_id);
+                            spool_issues.push_str(&format!("No tag descriptor found for spool {spool_id}, ignoring\n"));
                         }
                     }
                     Err(err) => {
-                        error!("Error reading extra data for spool {}, ignoring : {err:?}", spool_id);
+                        // TODO: remove this from log/issues - this is completely normal for all untagged spools
+                        if !(spools_db.records.borrow().get(spool_id.as_str()).unwrap().data.tag_id.is_empty()) {
+                            error!("Error reading extra data for tagged spool {}, ignoring : {err:?}", spool_id);
+                            spool_issues.push_str(&format!("Error reading extra data for tagged spool {}, ignoring : {err:?}\n", spool_id));
+                        }
                     }
                 }
                 // Store anyway, since there were issues with old files that needs to be fixed (writing small file on larger file leave extra in file)
                 // and potentially past versions with missing files
-                if let Err(err) = self.store_spool_rec_ext(&spool_id, &spool_rec_ext).await {
+                if let Err(err) = self.store_spool_rec_ext(spool_id, &spool_rec_ext).await {
                     // TODO: undo upgrade and restore old version of file system?
                     error!("Error storing ext data for spool {}, ignoring : {err:?}", spool_id);
+                    spool_issues.push_str(&format!("Error storing ext data for spool {}, ignoring : {err:?}\n", spool_id));
                 } else {
-                    spools_db.records.borrow_mut().get_mut(&spool_id).unwrap().data.ext_has_k = spool_rec_ext.k_info.is_some();
+                    spools_db.records.borrow_mut().get_mut(spool_id.as_str()).unwrap().data.ext_has_k = spool_rec_ext.k_info.is_some();
                 }
             }
             spools_db.save_all_records_only_before_use().await.context(CsvDbSnafu)?;
             spools_db.update_version(STORE_VER).await.context(CsvDbSnafu)?;
         }
-        Ok(())
+        if !spool_issues.is_empty() {
+            let file_store = self.framework.borrow().file_store();
+            let mut file_store = file_store.lock().await;
+            if let Err(err) = file_store.create_write_file_str("/STORE/upgrade.log", &spool_issues).await {
+                error!("Error writing upgrade issues log");
+            }
+        }
+        Ok(spool_issues.is_empty())
     }
 }
 
@@ -503,18 +521,32 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
 
                                 if current_version > db_version {
                                     info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                                    term_info!("Upgrading store from {} to {}", db_version, current_version);
+                                    view_model.borrow().message_box("Store Notice", "Upgrading Store",  &format!("From Version {} to {}", db_version, current_version), crate::app::StatusType::Normal , 0);
+                                    term_info!("Upgrading Store From {} to {}", db_version, current_version);
                                     info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                                    if let Err(err) = store.upgrade_versions(db_version, current_version, view_model.clone()).await {
-                                        info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                                        term_error!("Error upgrading store : {:?}", err);
-                                        info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                                        db_available = false;
-                                    } else {
-                                        info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                                        term_info!("Store upgrade completed successfully");
-                                        info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                                        db_available = true;
+                                    match store.upgrade_versions(db_version, current_version, view_model.clone()).await {
+                                        Ok(status) => {
+                                            info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                                            let (upgrade_notice1, upgrade_notice2, upgrade_status) = {
+                                                if status {
+                                                    ("Store Upgrade Completed Successfuly", "No Issues Reported", crate::app::StatusType::Success)
+                                                } else {
+                                                    ("Store Upgrade Completed With Issues", "See /STORE/upgrade.log for details", crate::app::StatusType::Normal)
+                                                }
+                                            };
+                                            view_model.borrow().message_box("Store Notice", upgrade_notice1,  upgrade_notice2, upgrade_status, 0);
+                                            term_info!(upgrade_notice1);
+                                            term_info!(upgrade_notice2);
+                                            info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                                            db_available = true;
+                                        }
+                                        Err(err) => {
+                                            info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                                            term_error!("Error upgrading store : {:?}", err);
+                                            view_model.borrow().message_box("Store Notice", "Error Upgrading Store",  &err.to_string(), crate::app::StatusType::Error , 0);
+                                            info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                                            db_available = false;
+                                        }
                                     }
                                 } else {
                                     db_available = true;

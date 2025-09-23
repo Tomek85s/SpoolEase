@@ -180,6 +180,12 @@ impl ViewModel {
         view_model_rc
     }
 
+    pub fn message_box(&self, title: &str, text: &str, text2: &str, status_type: crate::app::StatusType, timeout: i32) {
+        let ui = self.ui_weak.unwrap();
+        let ui_app_state: crate::app::AppState<'_> = ui.global::<crate::app::AppState>();
+        ui_app_state.invoke_show_message_box(title.into(), text.into(),  text2.into(), status_type, timeout); 
+    }
+
     pub fn init_only_if_sdcard_init_ok(&mut self) {
         self.store.start(self.view_model.clone().unwrap());
 
@@ -1986,9 +1992,9 @@ impl FrameworkObserver for ViewModel {
                 .unwrap()
                 .global::<crate::app::AppState>()
                 .invoke_boot_failed("Boot Failed\nScroll Up for Details".to_shared_string());
-            term_info!(&"x".repeat(47));
+            term_info!(&"x".repeat(44));
             term_info!("Initialization failed - Review errors, fix, and restart");
-            term_info!(&"x".repeat(47));
+            term_info!(&"x".repeat(44));
         }
     }
 }
