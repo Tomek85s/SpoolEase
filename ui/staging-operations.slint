@@ -28,7 +28,6 @@ component SpoolDisplayStep inherits Rectangle {
             }
 
             if AppState.spool-scale-state == SpoolScaleState.NotAvailable: MyButton {
-                enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
                 text: "Configure Slot";
                 clicked => {
                     AppState.control-state = ControlState.TraySelect;
@@ -70,7 +69,6 @@ component OperationSelectionStep inherits Rectangle {
                 }
 
                 MyButton {
-                    enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
                     text: "Configure Slot Manually";
                     clicked => {
                         AppState.control-state = ControlState.TraySelect;
@@ -78,7 +76,6 @@ component OperationSelectionStep inherits Rectangle {
                 }
 
                 MyButton {
-                    enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
                     text: "Clear Staging";
                     clicked => {
                         AppBackend.clear-staging();
@@ -88,7 +85,6 @@ component OperationSelectionStep inherits Rectangle {
 
             Row {
                 MyButton {
-                    enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
                     text: "Encode Tag";
                     clicked => {
                         AppState.encode-start();
@@ -96,12 +92,11 @@ component OperationSelectionStep inherits Rectangle {
                 }
 
                 MyButton {
-                    enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
+                    enabled: false;
                     text: "Unlink Tag";
                 }
 
                 MyButton {
-                    enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
                     text: "Erase Tag";
                     clicked => {
                       AppBackend.erase-tag-by-spool-id(AppState.spool-staging-info.id);
@@ -111,8 +106,15 @@ component OperationSelectionStep inherits Rectangle {
             }
             Row {
                 MyButton {
-                    enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
+                    enabled: false;
                     text: "Mark as Dried";
+                }
+
+                MyButton {
+                    // for used up spools it needs to show "mark refilled", and start process of weighting;
+                    // used up should clear the weights/fill the used, and mark it as used etc.
+                    enabled: false;
+                    text: "Mark Used-Up";
                 }
             }
         }

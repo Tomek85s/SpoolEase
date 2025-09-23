@@ -119,7 +119,7 @@ component V1TagPromptStep inherits Rectangle {
     background: white;
     VerticalLayout {
         Title {
-            text: "Unrecognized Previous Version Tag";
+            text: "Early Version Tag That's Not in Inventory";
         }
 
         VerticalLayout {
@@ -127,7 +127,7 @@ component V1TagPromptStep inherits Rectangle {
             padding: 5px;
             spacing: 5px;
             MyText {
-                text: "The scanned tag is from an older version and isn’t in your inventory.";
+                text: "This scanned tag is from an earlier SpoolEase version and isn’t in your inventory.";
                 wrap: word-wrap;
             }
 
@@ -139,7 +139,7 @@ component V1TagPromptStep inherits Rectangle {
                 type: ButtonType.RadioButton;
                 pushed: selected-operation == NewTagOperation.AddV1TagToInventory;
                 height: 56px;
-                text: "Add Spool to Inventory";
+                text: "Add Spool Data to Inventory";
                 pressed => {
                     pressed(NewTagOperation.AddV1TagToInventory);
                 }
@@ -149,7 +149,7 @@ component V1TagPromptStep inherits Rectangle {
                 pushed: selected-operation == NewTagOperation.EraseV1Tag;
                 type: ButtonType.RadioButton;
                 height: 56px;
-                text: "Erase Tag for Future Use";
+                text: "Erase Tag to Use it Without the Data";
                 pressed => {
                     pressed(NewTagOperation.EraseV1Tag);
                 }
