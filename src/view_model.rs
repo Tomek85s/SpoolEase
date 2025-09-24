@@ -897,6 +897,9 @@ impl ViewModel {
     }
 
     fn ui_get_spool_record_display(&self, ui_spool_id: &SharedString) -> UiSpoolRecordDisplay {
+        if ui_spool_id.is_empty() {
+            return UiSpoolRecordDisplay::default();
+        }
         let spool_rec = self.store.get_spool_by_id(ui_spool_id.as_str());
         if spool_rec.is_none() {
             return UiSpoolRecordDisplay::default();

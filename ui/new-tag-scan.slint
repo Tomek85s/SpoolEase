@@ -1,9 +1,10 @@
 import { MyText, MyButton, ButtonType, WizardButtons, Title } from "framework/widgets.slint";
 import { NumPad } from "numpad.slint";
-import { AppBackend, AppState, ControlState, NewTagScanPage, NewTagOperation, SpoolScaleState } from "app.slint";
+import { AppBackend, AppState, ControlState, NewTagScanPage, NewTagOperation, SpoolScaleState, UiSpoolRecordDisplay } from "app.slint";
 import { Utils } from "utils.slint";
 import { ScaleWeightDisplay } from "app-widgets.slint";
 import { SpoolDisplay } from "spool-display.slint";
+import { UpdateWeightPage } from "common-operations.slint";
 
 component OperationSelectionStep inherits Rectangle {
     background: white;
@@ -100,7 +101,7 @@ component SpoolSelectStep inherits Rectangle {
             next-clicked => {
                 num-pad.display-error = AppBackend.can-link-spool-to-tag(num-pad.number);
                 if num-pad.display-error == "" {
-                    AppState.new-tag-scan-spool-id = root.spool-id;
+                    AppState.new-tag-scan-spool-id = num-pad.number;
                     AppState.new-tag-scan-spool-id-int = num-pad.number;
                     AppState.new-tag-scan-page = NewTagScanPage.LinkSpoolDisplay;
                 }
@@ -179,11 +180,12 @@ component V1TagPromptStep inherits Rectangle {
 component SpoolDisplayStep inherits Rectangle {
     in-out property <string> cancel-text: "";
     in-out property <string> next-text: "";
+    in property <UiSpoolRecordDisplay> spool-display;
     property <bool> last-step: !AppState.is-scale-usable-now();
     VerticalLayout {
         SpoolDisplay {
             show-title: true;
-            spool-display: AppBackend.get-spool-record-display(AppState.new-tag-scan-spool-id);
+            spool-display: root.spool-display;
         }
 
         WizardButtons {
@@ -204,82 +206,6 @@ component SpoolDisplayStep inherits Rectangle {
             }
             cancel-clicked => {
                 AppState.control-state = ControlState.Ready;
-            }
-        }
-    }
-}
-
-component MeasureWeightPage inherits Rectangle {
-    in-out property <bool> unused: unused.pushed;
-    background: white;
-    VerticalLayout {
-        Title {
-            text: "Linking Tag Succeeded, Measure Weight";
-        }
-
-        VerticalLayout {
-            alignment: start;
-            padding: 5px;
-            spacing: 8px;
-
-            Rectangle {
-                VerticalLayout {
-                    spacing: 8px;
-                    Rectangle {
-                        MyText {
-                            width: parent.width;
-                            text: "Now is a good time to measure spool weight,\nplease place it on the scale.";
-                            wrap: word-wrap;
-                        }
-                    }
-
-                    HorizontalLayout {
-                        alignment: center;
-                        scale-display := ScaleWeightDisplay {
-                            weight-display-content: Gross;
-                            width: 160px;
-                        }
-                    }
-
-                    MyText {
-                        width: parent.width;
-                        text: "Is the spool currently new or has been used?";
-                    }
-
-                    // TODO: default based on backend info (need to add to encode-request/display the added-as-new)
-                    HorizontalLayout {
-                        used := MyButton {
-                            height: 56px;
-                            type: PushButton;
-                            text: "Used";
-                            clicked => {
-                                unused.pushed = false;
-                            }
-                        }
-
-                        unused := MyButton {
-                            height: 56px;
-                            type: PushButton;
-                            text: "New/Unused";
-                            clicked => {
-                                used.pushed = false;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        WizardButtons {
-            back-enabled: false;
-            next-enabled: scale-display.stable-weight && (used.pushed || unused.pushed);
-            cancel-enabled: true;
-            next-text: "Weight & Finish";
-            cancel-clicked => {
-                AppState.control-state = ControlState.Ready;
-            }
-            next-clicked => {
-                AppBackend.set-spool-weight(AppState.new-tag-scan-spool-id, AppState.spool-scale-weight, root.unused ? AppState.spool-scale-weight : -1, true);
             }
         }
     }
@@ -312,14 +238,30 @@ component StatusDisplayPage inherits Rectangle {
 export component NewTagScan inherits Rectangle {
     width: 480px;
     height: 320px;
+    property <UiSpoolRecordDisplay> spool-display: AppBackend.get-spool-record-display(AppState.new-tag-scan-spool-id);
 
     if AppState.new-tag-scan-page == NewTagScanPage.OperationSelect: oper-select := OperationSelectionStep { }
 
     if AppState.new-tag-scan-page == NewTagScanPage.SpoolSelect: spool-select := SpoolSelectStep { }
 
-    if AppState.new-tag-scan-page == NewTagScanPage.LinkSpoolDisplay: spool-display := SpoolDisplayStep { }
+    if AppState.new-tag-scan-page == NewTagScanPage.LinkSpoolDisplay: spool-display := SpoolDisplayStep {
+        spool-display: root.spool-display;
+    }
 
-    if AppState.new-tag-scan-page == NewTagScanPage.MeasureWeight: measure-weight-display := MeasureWeightPage { }
+    if AppState.new-tag-scan-page == NewTagScanPage.UpdateWeight: update-weight-display := UpdateWeightPage {
+        final-step: true;
+        title: "Linking Tag Succeeded, Measure Weight";
+        user-prompt: "Now is a good time to measure spool weight,\nplease place it on the scale.";
+        weight-current: spool-display.spool-record.weight-current;
+        weight-new: spool-display.spool-record.weight-new;
+        spool-id: spool-display.spool-record.id;
+        cancel-clicked => {
+            AppState.control-state = ControlState.Ready;
+        }
+        back-clicked => {
+            AppState.staging-operation-page = AppState.prev-staging-operation-page;
+        }
+    }
 
     if AppState.new-tag-scan-page == NewTagScanPage.StatusDisplay: status-display := StatusDisplayPage { }
 

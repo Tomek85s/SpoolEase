@@ -157,7 +157,7 @@ export enum NewTagScanPage {
     OperationSelect,
     SpoolSelect,
     LinkSpoolDisplay,
-    MeasureWeight,
+    UpdateWeight,
     StatusDisplay,
     V1TagPrompt,
 }
@@ -202,6 +202,7 @@ export global AppState {
     in-out property <string> new-tag-scan-v1-tag: "";
 
     in-out property <StagingOperationsPage> staging-operation-page: StagingOperationsPage.OperationSelection;
+    in-out property <StagingOperationsPage> prev-staging-operation-page: StagingOperationsPage.OperationSelection;
 
     // Global state for TraySelected Control-State
     in-out property <int> tray-selected-tray-index: -1;
@@ -578,7 +579,7 @@ export global AppState {
       if self.control-state == ControlState.NewTagScan {
             if status == "" {
           // this will be effective only if there is a weight (this will be driven by the flow in the screen itself)
-          self.new-tag-scan-page = NewTagScanPage.MeasureWeight;
+          self.new-tag-scan-page = NewTagScanPage.UpdateWeight;
             } else {
                 self.new-tag-scan-page = NewTagScanPage.StatusDisplay;
                 self.new-tag-scan-status = status;
