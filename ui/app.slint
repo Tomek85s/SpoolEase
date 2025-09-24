@@ -143,7 +143,7 @@ export global AppBackend {
     pure callback get-available-scales-info() -> [string];
     callback link_tag_to_spool_id(tag_id: string, spool-id: string, final-step: bool);
     callback unlink-spool-from-tag(spool-id: string);
-    callback set-spool-weight(spool-id: string, weight: int, unused: bool, final-step: bool);
+    callback set-spool-weight(spool-id: string, weight_current: int, weight_new: int, final-step: bool);
     pure callback recently_added_spool_id_if_untagged() -> string;
     pure callback get-spool-record-display(spool-id: string) -> UiSpoolRecordDisplay;
     pure callback get-slot-display(tray-id: int) -> UiSlotDisplay;
@@ -170,6 +170,13 @@ export enum NewTagOperation {
   EraseV1Tag, // V1
 }
 
+export enum StagingOperationsPage {
+  SpoolDisplay,
+  OperationSelection,
+  UpdateWeight,
+}
+
+
 export global AppState {
     in-out property <string> message-box-title;
     in-out property <string> message-box-text;
@@ -193,6 +200,8 @@ export global AppState {
     in-out property <string> new-tag-scan-spool-id: "";
     in-out property <int> new-tag-scan-spool-id-int: 0;
     in-out property <string> new-tag-scan-v1-tag: "";
+
+    in-out property <StagingOperationsPage> staging-operation-page: StagingOperationsPage.OperationSelection;
 
     // Global state for TraySelected Control-State
     in-out property <int> tray-selected-tray-index: -1;
@@ -361,6 +370,10 @@ export global AppState {
             self.spool-staging-state = state;
             start-highlight-tray(999);
         }
+        if self.control-state == ControlState.StagingSelected && self.staging-operation-page == StagingOperationsPage.UpdateWeight {
+          self.show-message-box("Store Notice", "Updated Spool \{ui-spool-info.id} Weight", "", StatusType.Success, -1);
+          self.control-state = ControlState.Ready;
+        }
     }
 
     public function empty-spool-staging() {
@@ -436,6 +449,7 @@ export global AppState {
     }
 
     public function staging-selected() {
+        self.staging-operation-page = StagingOperationsPage.SpoolDisplay;
         self.control-state = ControlState.StagingSelected;
     }
 

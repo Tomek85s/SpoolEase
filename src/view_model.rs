@@ -288,11 +288,11 @@ impl ViewModel {
         });
 
         let moved_view_model = self.view_model.clone().unwrap();
-        ui_app_backend.on_set_spool_weight(move |spool_id, weight, unused, final_step| {
+        ui_app_backend.on_set_spool_weight(move |spool_id, weight_current, weight_new, final_step| {
             let _ = moved_view_model.borrow().dispatch_async_task(AppAsyncTaskRequest::SetSpoolWeight {
                 spool_id: spool_id.into(),
-                weight,
-                unused,
+                weight_current,
+                weight_new,
                 final_step,
             });
         });
@@ -1597,21 +1597,43 @@ impl ViewModel {
             view_model.borrow().display_filament_staging(false);
         }
     }
-    async fn set_spool_weight_async(view_model: Rc<RefCell<ViewModel>>, spool_id: String, weight: i32, unused: bool, final_step: bool) {
+
+    // weight_new: if -1 don't touch, otherwiser set value (and added_full)
+    async fn set_spool_weight_async(view_model: Rc<RefCell<ViewModel>>, spool_id: String, weight_current: i32, weight_new: i32, final_step: bool) {
         let store = view_model.borrow().store.clone();
         if let Some(mut spool_rec) = store.get_spool_by_id(&spool_id) {
-            spool_rec.weight_current = Some(weight);
-            if unused {
-                spool_rec.weight_new = Some(weight);
-                spool_rec.added_full = Some(true);
-            }
+            spool_rec.weight_current = Some(weight_current);
+            if weight_new != -1 {
+                spool_rec.weight_new = Some(weight_new);
+                if weight_new != 0 {
+                    spool_rec.added_full = Some(true);
+                } // else - don't touch added-full
+            } // else - don't touch weight-new
             match store.update_spool(spool_rec.clone(), None).await {
                 Ok(_) => {
                     view_model.borrow().filament_staging.borrow_mut().update_spool_rec_keep_rest(spool_rec);
                     view_model.borrow().display_filament_staging(final_step);
                 }
-                Err(_) => todo!(),
+                Err(err) => {
+                    error!("Failed to Update Spool {spool_id} Weight");
+                    view_model.borrow().message_box(
+                        "Inventory Notice",
+                        &format!("Failed to Update Spool {spool_id} Weight"),
+                        &err.to_string(),
+                        crate::app::StatusType::Error,
+                        0,
+                    );
+                }
             }
+        } else {
+            error!("Failed to Update Spool {spool_id} Weight: Spool Id not found");
+            view_model.borrow().message_box(
+                "Inventory Notice",
+                &format!("Failed to Update Spool {spool_id} Weight"),
+                "Spool Id Not Found",
+                crate::app::StatusType::Error,
+                0,
+            );
         }
     }
 
@@ -2468,8 +2490,8 @@ enum AppAsyncTaskRequest {
     },
     SetSpoolWeight {
         spool_id: String,
-        weight: i32,
-        unused: bool,
+        weight_current: i32,
+        weight_new: i32,
         final_step: bool,
     },
     UpdateSpoolRec {
@@ -2506,10 +2528,10 @@ pub async fn app_async_task(view_model: Rc<RefCell<ViewModel>>) {
             AppAsyncTaskRequest::SetStagingRecExt { spool_id } => ViewModel::set_staging_rec_ext_async(view_model.clone(), spool_id).await,
             AppAsyncTaskRequest::SetSpoolWeight {
                 spool_id,
-                weight,
-                unused,
+                weight_current,
+                weight_new,
                 final_step,
-            } => ViewModel::set_spool_weight_async(view_model.clone(), spool_id, weight, unused, final_step).await,
+            } => ViewModel::set_spool_weight_async(view_model.clone(), spool_id, weight_current, weight_new, final_step).await,
             AppAsyncTaskRequest::UpdateSpoolRec { spool_rec } => ViewModel::update_spool_rec_async(view_model.clone(), spool_rec).await,
         }
     }

@@ -210,8 +210,6 @@ component SpoolDisplayStep inherits Rectangle {
 }
 
 component MeasureWeightPage inherits Rectangle {
-    in-out property <bool> success;
-    in-out property <string> message;
     in-out property <bool> unused: unused.pushed;
     background: white;
     VerticalLayout {
@@ -281,7 +279,7 @@ component MeasureWeightPage inherits Rectangle {
                 AppState.control-state = ControlState.Ready;
             }
             next-clicked => {
-                AppBackend.set-spool-weight(AppState.new-tag-scan-spool-id, AppState.spool-scale-weight, root.unused, true);
+                AppBackend.set-spool-weight(AppState.new-tag-scan-spool-id, AppState.spool-scale-weight, root.unused ? AppState.spool-scale-weight : -1, true);
             }
         }
     }
