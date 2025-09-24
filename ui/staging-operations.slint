@@ -20,8 +20,7 @@ component SpoolDisplayStep inherits Rectangle {
                 enabled: AppState.spool-staging-state != SpoolStagingState.Empty && AppState.is-scale-usable-now();
                 text: "Update Weight";
                 clicked => {
-                    AppState.prev-staging-operation-page = AppState.staging-operation-page;
-                    AppState.staging-operation-page = StagingOperationsPage.UpdateWeight;
+                    AppBackend.set-spool-weight(spool-display.spool-record.id, AppState.spool-scale-weight, -1, false);
                 }
             }
 
@@ -62,7 +61,7 @@ component OperationSelectionStep inherits Rectangle {
             Row {
                 MyButton {
                     enabled: AppState.spool-staging-state != SpoolStagingState.Empty && AppState.is-scale-usable-now();
-                    text: "Update Weight";
+                    text: "Update Weight Extended";
                     clicked => {
                         AppState.prev-staging-operation-page = AppState.staging-operation-page;
                         AppState.staging-operation-page = StagingOperationsPage.UpdateWeight;

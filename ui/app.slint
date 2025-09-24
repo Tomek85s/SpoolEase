@@ -371,8 +371,11 @@ export global AppState {
             self.spool-staging-state = state;
             start-highlight-tray(999);
         }
-        if self.control-state == ControlState.StagingSelected && self.staging-operation-page == StagingOperationsPage.UpdateWeight {
-          self.show-message-box("Store Notice", "Updated Spool \{ui-spool-info.id} Weight", "", StatusType.Success, -1);
+    }
+
+    public function updated-spool-weight(spool-id: string, from_button: bool) {
+        self.show-message-box("Inventory Notice", "Updated Spool \{spool-id} Weight", "", StatusType.Success, -1);
+        if !from_button && (self.control-state == ControlState.StagingSelected || self.control-state == ControlState.NewTagScan) {
           self.control-state = ControlState.Ready;
         }
     }

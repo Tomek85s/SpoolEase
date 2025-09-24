@@ -278,22 +278,23 @@ impl ViewModel {
                 spool_id: spool_id.into(),
                 final_step,
             });
-        });
+            });
 
-        let moved_view_model = self.view_model.clone().unwrap();
-        ui_app_backend.on_unlink_spool_from_tag(move |spool_id| {
-            let _ = moved_view_model
-                .borrow()
-                .dispatch_async_task(AppAsyncTaskRequest::UnLinkSpoolFromTag { spool_id: spool_id.into() });
-        });
+            let moved_view_model = self.view_model.clone().unwrap();
+            ui_app_backend.on_unlink_spool_from_tag(move |spool_id| {
+                let _ = moved_view_model
+                    .borrow()
+                    .dispatch_async_task(AppAsyncTaskRequest::UnLinkSpoolFromTag { spool_id: spool_id.into() });
+            });
 
-        let moved_view_model = self.view_model.clone().unwrap();
-        ui_app_backend.on_set_spool_weight(move |spool_id, weight_current, weight_new, final_step| {
-            let _ = moved_view_model.borrow().dispatch_async_task(AppAsyncTaskRequest::SetSpoolWeight {
-                spool_id: spool_id.into(),
-                weight_current,
-                weight_new,
-                final_step,
+            let moved_view_model = self.view_model.clone().unwrap();
+            ui_app_backend.on_set_spool_weight(move |spool_id, weight_current, weight_new, final_step| {
+                let _ = moved_view_model.borrow().dispatch_async_task(AppAsyncTaskRequest::SetSpoolWeight {
+                    spool_id: spool_id.into(),
+                    weight_current,
+                    weight_new,
+                    final_step,
+                    from_button: false,
             });
         });
 
@@ -1259,7 +1260,7 @@ impl ViewModel {
         }
     }
 
-    pub fn update_spool_weight(&self, scale_weight: ScaleWeight) -> Option<bool> {
+    pub fn update_spool_weight_from_button(&self, scale_weight: ScaleWeight) -> Option<bool> {
         let ui = self.ui_weak.unwrap();
         let ui_app_state = ui.global::<crate::app::AppState>();
         if self.filament_staging.borrow().full_spool_rec().is_some() {
@@ -1267,28 +1268,35 @@ impl ViewModel {
                 ScaleWeight::Stable(weight) => {
                     if weight == 0 {
                         info!("User Error: Reqeust to store tag with no weight on scale");
-                        ui_app_state.invoke_show_message_box(
-                            "Scale Notice".into(),
-                            "No Weight on Scale".into(),
-                            "Can't Update Spool Weight".into(),
+                        self.message_box(
+                            "Scale Notice",
+                            "No Weight on Scale",
+                            "Can't Update Spool Weight",
                             crate::app::StatusType::Error,
                             -1,
                         );
                         Some(false)
+                    } else if let Some(spool_id) = self.filament_staging.borrow().spool_rec().map(|sr| sr.id.clone()) {
+                        let _ = self.dispatch_async_task(AppAsyncTaskRequest::SetSpoolWeight {
+                            spool_id,
+                            weight_current: weight,
+                            weight_new: -1,
+                            final_step: false,
+                            from_button: true,
+                        });
+                        Some(true)
                     } else {
-                        match self.dispatch_async_task(AppAsyncTaskRequest::UpdateSpoolWeight { weight }) {
-                            Ok(_) => None,
-                            Err(_) => Some(false),
-                        }
+                        self.message_box("Staging Notice", "No Spool in Staging", "", crate::app::StatusType::Error, 0);
+                        Some(false)
                     }
                 }
                 ScaleWeight::Unstable(_) => {
                     info!("User Error: Reqeust to store tag with weight but scale weight is not stable");
 
-                    ui_app_state.invoke_show_message_box(
-                        "Scale Notice".into(),
-                        "Weight on Scale Not Stable".into(),
-                        "Can't Update Spool Weight".into(),
+                    self.message_box(
+                        "Scale Notice",
+                        "Weight on Scale Not Stable",
+                        "Can't Update Spool Weight",
                         crate::app::StatusType::Error,
                         -1,
                     );
@@ -1297,10 +1305,10 @@ impl ViewModel {
                 }
                 ScaleWeight::Unknown => {
                     info!("Software Error: scale weight unknown after connect?");
-                    ui_app_state.invoke_show_message_box(
-                        "Software Notice".into(),
-                        "Internal Software Error".into(),
-                        "Can't Update Spool Weight".into(),
+                    self.message_box(
+                        "Software Notice",
+                        "Internal Software Error",
+                        "Can't Update Spool Weight",
                         crate::app::StatusType::Error,
                         -1,
                     );
@@ -1319,45 +1327,6 @@ impl ViewModel {
             );
             Some(false)
             // TODO:  notify on GUI and on Scale Led
-        }
-    }
-
-    pub async fn update_spool_weight_async(view_model: Rc<RefCell<ViewModel>>, weight: i32) {
-        let store = view_model.borrow().store.clone();
-        let spool_rec = {
-            let view_model_borrow = view_model.borrow();
-            let filament_staging_borrow = view_model_borrow.filament_staging.borrow();
-            let spool_rec = filament_staging_borrow.spool_rec().cloned();
-            spool_rec
-        };
-
-        if let Some(mut spool_rec) = spool_rec {
-            spool_rec.weight_current = Some(weight);
-            let spool_rec_id = spool_rec.id.clone();
-            let update_res = store.update_spool(spool_rec, None).await;
-            match update_res {
-                Ok(_) => {
-                    view_model.borrow().message_box(
-                        "Inventory Notice",
-                        &format!("Updated Spool {} Weight", spool_rec_id),
-                        "",
-                        crate::app::StatusType::Success,
-                        -1,
-                    );
-                    view_model.borrow().spool_scale_model.borrow().button_response(true);
-                }
-                Err(err) => {
-                    error!("Error updating spool weight in store : {err:?}");
-                    view_model.borrow().message_box(
-                        "Inventory Notice",
-                        &format!("Failed to Update Spool {} Weight", spool_rec_id),
-                        &err.to_string(),
-                        crate::app::StatusType::Error,
-                        -1,
-                    );
-                    view_model.borrow().spool_scale_model.borrow().button_response(false);
-                }
-            }
         }
     }
 
@@ -1602,7 +1571,7 @@ impl ViewModel {
     }
 
     // weight_new: if -1 don't touch, otherwiser set value (and added_full)
-    async fn set_spool_weight_async(view_model: Rc<RefCell<ViewModel>>, spool_id: String, weight_current: i32, weight_new: i32, final_step: bool) {
+    async fn set_spool_weight_async(view_model: Rc<RefCell<ViewModel>>, spool_id: String, weight_current: i32, weight_new: i32, final_step: bool, from_button: bool) {
         let store = view_model.borrow().store.clone();
         if let Some(mut spool_rec) = store.get_spool_by_id(&spool_id) {
             spool_rec.weight_current = Some(weight_current);
@@ -1616,6 +1585,9 @@ impl ViewModel {
                 Ok(_) => {
                     view_model.borrow().filament_staging.borrow_mut().update_spool_rec_keep_rest(spool_rec);
                     view_model.borrow().display_filament_staging(final_step);
+                    let ui = view_model.borrow().ui_weak.unwrap();
+                    let ui_app_state = ui.global::<crate::app::AppState>();
+                    ui_app_state.invoke_updated_spool_weight(spool_id.into(), from_button);
                 }
                 Err(err) => {
                     error!("Failed to Update Spool {spool_id} Weight");
@@ -2208,7 +2180,7 @@ impl SpoolScaleObserver for ViewModel {
     }
 
     fn on_button_pressed(&mut self, scale_weight: ScaleWeight) -> Option<bool> {
-        self.update_spool_weight(scale_weight)
+        self.update_spool_weight_from_button(scale_weight)
     }
 
     // note that this is from Scale (which ends up calling the GcodeAnalyzerObserver on_gcode_analysis)
@@ -2477,9 +2449,6 @@ enum AppAsyncTaskRequest {
         tag_id: String,
         tag: String,
     },
-    UpdateSpoolWeight {
-        weight: i32,
-    },
     LinkTagToSpool {
         tag_id: String,
         spool_id: String,
@@ -2496,6 +2465,7 @@ enum AppAsyncTaskRequest {
         weight_current: i32,
         weight_new: i32,
         final_step: bool,
+        from_button: bool,
     },
     UpdateSpoolRec {
         spool_rec: SpoolRecord,
@@ -2521,7 +2491,6 @@ pub async fn app_async_task(view_model: Rc<RefCell<ViewModel>>) {
     loop {
         match requests.receive().await {
             AppAsyncTaskRequest::ProcessV1TagRead { tag_id, tag } => ViewModel::process_v1_tag_read_async(view_model.clone(), tag_id, tag).await,
-            AppAsyncTaskRequest::UpdateSpoolWeight { weight } => ViewModel::update_spool_weight_async(view_model.clone(), weight).await,
             AppAsyncTaskRequest::LinkTagToSpool {
                 tag_id,
                 spool_id,
@@ -2534,7 +2503,8 @@ pub async fn app_async_task(view_model: Rc<RefCell<ViewModel>>) {
                 weight_current,
                 weight_new,
                 final_step,
-            } => ViewModel::set_spool_weight_async(view_model.clone(), spool_id, weight_current, weight_new, final_step).await,
+                from_button,
+            } => ViewModel::set_spool_weight_async(view_model.clone(), spool_id, weight_current, weight_new, final_step, from_button).await,
             AppAsyncTaskRequest::UpdateSpoolRec { spool_rec } => ViewModel::update_spool_rec_async(view_model.clone(), spool_rec).await,
         }
     }
