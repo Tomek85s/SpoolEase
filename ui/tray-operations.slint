@@ -43,14 +43,14 @@ component TrayDisplayStep inherits Rectangle {
             }
         }
 
-        if root.tab == TrayDisplayTab.Spool: SpoolDisplay { 
-          vertical-stretch: 1;
-          show-title: false;
-          spool-display: root.spool-display;
+        if root.tab == TrayDisplayTab.Spool: SpoolDisplay {
+            vertical-stretch: 1;
+            show-title: false;
+            spool-display: root.spool-display;
         }
-        if root.tab == TrayDisplayTab.Slot: SlotDisplay { 
-          vertical-stretch: 1;
-          slot-index: root.tray-index;
+        if root.tab == TrayDisplayTab.Slot: SlotDisplay {
+            vertical-stretch: 1;
+            slot-index: root.tray-index;
         }
 
         HorizontalLayout {
@@ -79,6 +79,7 @@ component TrayDisplayStep inherits Rectangle {
 
 component OperationSelectionStep inherits Rectangle {
     background: white;
+    in property <int> tray-index;
 
     VerticalLayout {
         Title {
@@ -91,6 +92,10 @@ component OperationSelectionStep inherits Rectangle {
             Row {
                 MyButton {
                     text: "Untag Slot";
+                    clicked => {
+                        AppBackend.untag-slot(AppState.trays-state[AppState.tray-selected-tray-index].id);
+                        AppState.control-state = ControlState.Ready;
+                    }
                 }
 
                 MyButton {
@@ -142,5 +147,7 @@ export component TrayOperations {
             page = TrayOperationsPage.OperationSelection;
         }
     }
-    if page == TrayOperationsPage.OperationSelection: OperationSelectionStep { }
+    if page == TrayOperationsPage.OperationSelection: OperationSelectionStep {
+        tray-index: AppState.tray-selected-tray-index;
+    }
 }

@@ -410,6 +410,18 @@ impl ViewModel {
         ui_framework_backend.on_update_firmware_ota(move || {
             framework.borrow().update_firmware_ota();
         });
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::FrameworkBackend>()
+            .on_info(move |text| moved_view_model.borrow().ui_info(text.as_str()));
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::FrameworkBackend>()
+            .on_debug(move |text| moved_view_model.borrow().ui_debug(text.as_str()));
     }
 
     pub fn init_app_stuff(&mut self) {
@@ -554,14 +566,9 @@ impl ViewModel {
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
         self.ui_weak
             .unwrap()
-            .global::<crate::app::FrameworkBackend>()
-            .on_info(move |text| moved_view_model.borrow().ui_info(text.as_str()));
+            .global::<crate::app::AppBackend>()
+            .on_untag_slot(move |tray_id| moved_view_model.borrow().ui_untag_slot(tray_id));
 
-        let moved_view_model = self.view_model.as_ref().unwrap().clone();
-        self.ui_weak
-            .unwrap()
-            .global::<crate::app::FrameworkBackend>()
-            .on_debug(move |text| moved_view_model.borrow().ui_debug(text.as_str()));
     }
 
     fn perform_select_printer(
@@ -769,6 +776,10 @@ impl ViewModel {
             });
     }
 
+    fn ui_untag_slot(&self, tray_id: i32) {
+        self.bambu_printer_model.borrow_mut().update_any_tray(tray_id as usize, |tray| tray.meta_info.spool_id = None);
+        self.update_ui_from_printer(&self.bambu_printer_model.borrow());
+    }
     fn ui_term_info(&self, text: &str) {
         self._terminal_view_model.borrow_mut().on_add_text(text);
     }
@@ -872,15 +883,15 @@ impl ViewModel {
         let available_in_spool = self.weight_left(tray).unwrap_or_default();
 
         let pa = match tray.cali_idx {
-            Some(-1) | None => {
-                slint::format!("({})", tray.k_from_tray.unwrap_or(0.2))
+            Some(-1)| Some(0) | None => {
+                slint::format!("({})", tray.k_from_tray.unwrap_or(0.02))
             }
             Some(cali_idx) => {
                 let (k_value, profile_name) = printer_borrow
                     .calibrations
                     .iter()
                     .find(|c| c.cali_idx == cali_idx)
-                    .map_or(("0.2", ""), |c| (c.k_value.as_str(), c.name.as_str()));
+                    .map_or(("(0.02)", ""), |c| (c.k_value.as_str(), c.name.as_str()));
                 slint::format!("{k_value}, {profile_name}")
             }
         };

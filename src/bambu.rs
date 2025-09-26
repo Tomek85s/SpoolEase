@@ -1044,7 +1044,7 @@ impl BambuPrinter {
             &print.cali_idx,
         ) {
             self.update_any_tray(tray_id, |tray| {
-                tray.cali_idx = if *cali_idx == -1 { None } else { Some(*cali_idx) };
+                tray.cali_idx = if *cali_idx == -1 || *cali_idx == 0 { None } else { Some(*cali_idx) };
             });
             change_made = true;
         }
