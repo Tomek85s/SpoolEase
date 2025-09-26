@@ -79,6 +79,7 @@ component OperationSelectionStep inherits Rectangle {
                     text: "Clear Staging";
                     clicked => {
                         AppBackend.clear-staging();
+                        AppState.control-state = ControlState.Ready;
                     }
                 }
             }
@@ -109,6 +110,7 @@ component OperationSelectionStep inherits Rectangle {
 
             Row {
                 MyButton {
+                    visible: false;
                     enabled: false;
                     text: "Mark as Dried";
                 }
@@ -116,6 +118,7 @@ component OperationSelectionStep inherits Rectangle {
                 MyButton {
                     // for used up spools it needs to show "mark refilled", and start process of weighting;
                     // used up should clear the weights/fill the used, and mark it as used etc.
+                    visible: false;
                     enabled: false;
                     text: "Mark Used-Up";
                 }

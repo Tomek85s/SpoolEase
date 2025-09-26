@@ -57,7 +57,8 @@ component TrayDisplayStep inherits Rectangle {
             vertical-stretch: 0;
             height: 56px;
             MyButton {
-                text: "Reset Tray";
+                visible: false;
+                text: "Unload";
             }
 
             MyButton {
@@ -107,6 +108,7 @@ component OperationSelectionStep inherits Rectangle {
                 }
 
                 MyButton {
+                    visible: false;
                     text: "Unload Filament";
                     clicked => {
                     }
@@ -138,7 +140,8 @@ enum TrayOperationsPage {
 }
 
 
-export component TrayOperations {
+export component TrayOperations inherits Rectangle {
+    background: white;
     property <TrayOperationsPage> page: AppState.trays-state[AppState.tray-selected-tray-index].filament.state == UiFilamentState.Known ? TrayOperationsPage.SpoolDisplay : TrayOperationsPage.OperationSelection;
     if page == TrayOperationsPage.SpoolDisplay: TrayDisplayStep {
         spool-id: AppState.trays-state[AppState.tray-selected-tray-index].spool_rec_id;
