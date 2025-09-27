@@ -34,7 +34,7 @@ use shared::gcode_analysis_task::Fetch3mf;
 use crate::app_config::{AppConfig, DefaultPrinterConfig, PrinterConfig, PrintersConfig, ScaleConfig, FILAMENT_BRAND_NAMES, SPOOLS_CATALOG};
 use crate::bambu::KInfo;
 
-use crate::store::Store;
+use crate::store::{BackupMeta, FileMeta, Store};
 use crate::spool_record::{SpoolRecord, SpoolRecordExt};
 use crate::view_model::ViewModel;
 
@@ -503,16 +503,16 @@ impl AppWithStateBuilder for NestedAppBuilder {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct BackupMeta {
-    spoolease_console_ver: &'static str,
-}
-
-#[derive(Serialize, Deserialize)]
-struct FileMeta {
-    path: String,
-    length: usize,
-}
+// #[derive(Serialize, Deserialize)]
+// struct BackupMeta {
+//     spoolease_console_ver: &'static str,
+// }
+//
+// #[derive(Serialize, Deserialize)]
+// struct FileMeta {
+//     path: String,
+//     length: usize,
+// }
 
 struct StoreBackupChunks {
     framework: Rc<RefCell<Framework>>,
@@ -533,7 +533,7 @@ impl picoserve::response::chunked::Chunks for StoreBackupChunks {
         let mut lfn_buffer_storage = alloc::vec![0u8;32];
         let mut lfn_buffer = LfnBuffer::new(lfn_buffer_storage.as_mut_slice());
         let backup_meta = BackupMeta {
-            spoolease_console_ver: self.framework.borrow().settings.app_cargo_pkg_version,
+            spoolease_console_ver: self.framework.borrow().settings.app_cargo_pkg_version.to_string(),
         };
         let mut backup_meta_str = serde_json::to_string(&backup_meta).unwrap();
         backup_meta_str += "\n";

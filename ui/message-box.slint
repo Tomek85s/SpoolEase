@@ -35,20 +35,32 @@ export component MessageBox inherits Window {
                 VerticalLayout {
                     padding-top: 10px;
                     Rectangle {
-                        MyText {
-                            horizontal-alignment: left;
-                            text: dialog-text;
-                            wrap: word-wrap;
-                            color: Utils.contrasting_color(root.dialog-background);
+                        HorizontalLayout {
+                            padding-left: 5px;
+                            padding-right: 5px;
+                            width: dialog-width;
+                            alignment: center;
+                            MyText {
+                                horizontal-alignment: left;
+                                text: dialog-text;
+                                wrap: word-wrap;
+                                color: Utils.contrasting_color(root.dialog-background);
+                            }
                         }
                     }
 
                     Rectangle {
-                        MyText {
-                            horizontal-alignment: left;
-                            text: dialog-text2;
-                            wrap: word-wrap;
-                            color: Utils.contrasting_color(root.dialog-background);
+                        HorizontalLayout {
+                            padding-left: 5px;
+                            padding-right: 5px;
+                            width: dialog-width;
+                            alignment: center;
+                            MyText {
+                                horizontal-alignment: left;
+                                text: dialog-text2;
+                                wrap: word-wrap;
+                                color: Utils.contrasting_color(root.dialog-background);
+                            }
                         }
                     }
                 }

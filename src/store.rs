@@ -2,7 +2,7 @@ use core::cell::RefCell;
 use embassy_time::{Instant, Timer};
 use hashbrown::HashMap;
 use once_cell::unsync::OnceCell;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 use snafu::prelude::*;
 
@@ -424,7 +424,13 @@ impl Store {
             let num_of_spools = spool_ids.len();
             for (index, spool_id) in spool_ids.iter().enumerate() {
                 info!("Upgrading store spool # {spool_id}, {index} / {num_of_spools}");
-                view_model.borrow().message_box("Store Notice", &format!("Upgrading Spool # {spool_id}"), &format!("{index}/{num_of_spools}"), crate::app::StatusType::Normal , 0);
+                view_model.borrow().message_box(
+                    "Store Notice",
+                    &format!("Upgrading Spool # {spool_id}"),
+                    &format!("{index}/{num_of_spools}"),
+                    crate::app::StatusType::Normal,
+                    0,
+                );
                 let mut spool_rec_ext = SpoolRecordExt::default();
                 match self.get_spool_ext_by_id(spool_id.as_str()).await {
                     Ok(loaded_spool_rec_ext) => {
@@ -481,12 +487,219 @@ impl Store {
         }
         Ok(spool_issues.is_empty())
     }
+
+    pub async fn try_restore_from_backup(&self, view_model: Rc<RefCell<ViewModel>>) -> Result<(), String> {
+        info!("Trying to restore from backup if '/store.bak' exists");
+        let file_store = self.framework.borrow().file_store();
+        let mut file_store = file_store.lock().await;
+
+        // check if there is store.bak
+        let file_exist = file_store
+            .file_exists("/store.bak")
+            .await
+            .map_err(|e| format!("Error checking if '/store.bak' exists : {e}"))?;
+
+        if !file_exist {
+            info!("file '/store.bak' doesn't exist, no need to restore");
+            return Ok(());
+        }
+
+        let store_folder_exist = file_store
+            .dir_exists("/STORE")
+            .await
+            .map_err(|e| format!("Error checking if '/STORE' exists : {e}"))?;
+
+        // now check if store folder exist
+        if store_folder_exist {
+            error!("file '/store.bak' exists but '/STORE' folder also exists");
+            view_model.borrow().message_box(
+                "Restore Inventory Notice",
+                "Found '/store.bak' to Restore But '/STORE' Folder Exists",
+                "Remove '/STORE' Folder Manually to Restore or Remove '/store.bak' to Avoid This Message",
+                crate::app::StatusType::Error,
+                0,
+            );
+            return Ok(());
+        }
+
+        let backup_data = match file_store.read_file_bytes("/store.bak").await {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        let mut pos = 0;
+        let backup_data = backup_data.as_slice();
+        #[allow(unused_variables)]
+        let backup_meta = if let Some(next) = backup_data[pos..].iter().position(|&b| b == b'\n') {
+            let _backup_meta = match serde_json::from_slice::<BackupMeta>(&backup_data[..next]) {
+                Ok(v) => v,
+                Err(err) => {
+                    error!("Error in backup header: {err}");
+                    view_model.borrow().message_box(
+                        "Restoring Inventory",
+                        "Error in '/store.bak' File Content",
+                        "Unrecognized File Header Information",
+                        crate::app::StatusType::Error,
+                        0,
+                    );
+                    return Err("Error in /store.bak".to_string());
+                }
+            };
+            pos += next + 1;
+            _backup_meta
+        } else {
+            error!("Error parsing backup meta, \\n not found");
+            view_model.borrow().message_box(
+                "Restoring Inventory",
+                "Error in /store.bak File Content",
+                "Expected '\\n' Character When Searching For Header",
+                crate::app::StatusType::Error,
+                0,
+            );
+            return Err("Error in /store.bak".to_string());
+        };
+        while let Some(next) = backup_data[pos..].iter().position(|&b| b == b'\n') {
+            let file_meta = match serde_json::from_slice::<FileMeta>(&backup_data[pos..pos + next]) {
+                Ok(v) => v,
+                Err(err) => {
+                    error!("Error in file info header: {err}");
+                    error!("Bytes data: {:?}", &backup_data[pos..pos + next]);
+                    error!(
+                        "String data: {}",
+                        core::str::from_utf8(&backup_data[pos..pos + next]).unwrap_or("NOT Utf8")
+                    );
+                    view_model.borrow().message_box(
+                        "Restoring Inventory",
+                        "Error in '/store.bak' File Content",
+                        "Failed to Parse a File Details Part",
+                        crate::app::StatusType::Error,
+                        0,
+                    );
+                    return Err("Error in /store.bak".to_string());
+                }
+            };
+            pos += next + 1; // skip also \n
+
+            let file_content = &backup_data[pos..pos + file_meta.length];
+            match file_store.create_write_file_bytes(&file_meta.path, file_content).await {
+                Ok(_) => (),
+                Err(err) => {
+                    error!("Error writing file {} : {err:?}", file_meta.path);
+                    view_model.borrow().message_box(
+                        "Restoring Inventory",
+                        &format!("Error Writing {}", file_meta.path),
+                        &format!("{err:?}"),
+                        crate::app::StatusType::Error,
+                        0,
+                    );
+                    return Err(format!("Error writing file {}", file_meta.path));
+                }
+            }
+            info!("Restoring file: {file_meta:?}");
+            view_model.borrow().message_box(
+                "Restoring Inventory",
+                &format!("Restoring File\n{}", file_meta.path),
+                &format!("Progress: {}%", 100 * pos / backup_data.len()),
+                crate::app::StatusType::Normal,
+                0,
+            );
+            pos += file_meta.length + 1; // skip also \n
+        }
+
+        if let Err(err) = file_store.delete_file("/store.bak").await {
+            error!("Error deleting /store.bak : {err:?}");
+            view_model.borrow().message_box(
+                "Restoring Inventory",
+                "Inventory Restore Completed, But Failed to Delete '/store.bak'",
+                &format!("{err:?}"),
+                crate::app::StatusType::Error,
+                0,
+            );
+        } else {
+            view_model.borrow().message_box(
+                "Restoring Inventory",
+                "Inventory Restore Completed Successfully",
+                "",
+                crate::app::StatusType::Success,
+                0,
+            );
+        }
+
+        Ok(())
+    }
+
+    // pub async fn try_restore_from_backup(&self) {
+    //     info!("Running restore_from_backup");
+    //     let file_store = self.framework.borrow().file_store();
+    //     let mut file_store = file_store.lock().await;
+    //
+    //     let volume = {
+    //         match file_store.take_volume().await {
+    //             Ok(raw_volume) => raw_volume.to_volume(file_store.volume_mgr()),
+    //             Err(err) => {
+    //                 error!("Error opening volume: {err:?}");
+    //                 return;
+    //             }
+    //         }
+    //     };
+    //
+    //     // let volume = file_store.take_volume().await.context(StoreSnafu)?.to_volume(file_store.volume_mgr());
+    //     match volume.open_root_dir() {
+    //         Err(err) => {
+    //             error!(">>>> Can't open root dir : {err:?}");
+    //             // exit, don't return so cleanup takes place
+    //         }
+    //         Ok(dir) => {
+    //             match dir.open_file_in_dir("store.bak", sdcard_store::Mode::ReadOnly).await {
+    //                 Err(_err) => {
+    //                     // exit, don't return so cleanup takes place
+    //                 }
+    //                 Ok(file) => {
+    //                     let mut restorer = Restorer::new();
+    //                     loop {
+    //                         match file.read(restorer.get_write_buf()).await {
+    //                             Err(err) => {
+    //                                 debug!(">>>> Error reading from restore.bak: {err:?}");
+    //                                 break;
+    //                             }
+    //                             Ok(n) => {
+    //                                 if n == 0 {
+    //                                     break;
+    //                                 }
+    //                                 if let Err(err) = restorer.process_data(n, &file_store) {
+    //                                     error!("Error processing store.bak: {err}");
+    //                                     break;
+    //                                 }
+    //                             }
+    //                         }
+    //                     }
+    //                     if let Err(err) = file.close().await {
+    //                         error!("Error closing restore.bak : {err:?}");
+    //                     }
+    //                 }
+    //             }
+    //             if let Err(err) = dir.close() {
+    //                 error!("Error closing root directory : {err:?}");
+    //             }
+    //         }
+    //     }
+    //     let volume = volume.to_raw_volume();
+    //     file_store.return_volume(volume);
+    // }
 }
 
 #[embassy_executor::task] // up to two printers in parallel
 pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, view_model: Rc<RefCell<ViewModel>>) {
     let db_available;
     {
+        match store.try_restore_from_backup(view_model.clone()).await {
+            Ok(_) => (),
+            Err(_) => {
+                term_error!("Inventory Restore started but failed at a critical point, inventory not available");
+                loop {
+                    Timer::after_secs(60).await;
+                }
+            }
+        }
         debug!("Started store_task");
         let file_store = framework.borrow().file_store();
         match CsvDb::<SpoolRecord, _, FILE_STORE_MAX_DIRS, FILE_STORE_MAX_FILES>::new(file_store.clone(), "/store/spools", 1024, 200, STORE_VER).await
@@ -521,7 +734,13 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
 
                                 if current_version > db_version {
                                     info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                                    view_model.borrow().message_box("Store Notice", "Upgrading Store",  &format!("From Version {} to {}", db_version, current_version), crate::app::StatusType::Normal , 0);
+                                    view_model.borrow().message_box(
+                                        "Store Notice",
+                                        "Upgrading Store",
+                                        &format!("From Version {} to {}", db_version, current_version),
+                                        crate::app::StatusType::Normal,
+                                        0,
+                                    );
                                     term_info!("Upgrading Store From {} to {}", db_version, current_version);
                                     info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
                                     match store.upgrade_versions(db_version, current_version, view_model.clone()).await {
@@ -529,12 +748,22 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
                                             info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
                                             let (upgrade_notice1, upgrade_notice2, upgrade_status) = {
                                                 if status {
-                                                    ("Store Upgrade Completed Successfuly", "No Issues Reported", crate::app::StatusType::Success)
+                                                    (
+                                                        "Store Upgrade Completed Successfuly",
+                                                        "No Issues Reported",
+                                                        crate::app::StatusType::Success,
+                                                    )
                                                 } else {
-                                                    ("Store Upgrade Completed With Issues", "See /STORE/upgrade.log for details", crate::app::StatusType::Normal)
+                                                    (
+                                                        "Store Upgrade Completed With Issues",
+                                                        "See /STORE/upgrade.log for details",
+                                                        crate::app::StatusType::Normal,
+                                                    )
                                                 }
                                             };
-                                            view_model.borrow().message_box("Store Notice", upgrade_notice1,  upgrade_notice2, upgrade_status, 0);
+                                            view_model
+                                                .borrow()
+                                                .message_box("Store Notice", upgrade_notice1, upgrade_notice2, upgrade_status, 0);
                                             term_info!(upgrade_notice1);
                                             term_info!(upgrade_notice2);
                                             info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
@@ -543,7 +772,13 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
                                         Err(err) => {
                                             info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
                                             term_error!("Error upgrading store : {:?}", err);
-                                            view_model.borrow().message_box("Store Notice", "Error Upgrading Store",  &err.to_string(), crate::app::StatusType::Error , 0);
+                                            view_model.borrow().message_box(
+                                                "Store Notice",
+                                                "Error Upgrading Store",
+                                                &err.to_string(),
+                                                crate::app::StatusType::Error,
+                                                0,
+                                            );
                                             info!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
                                             db_available = false;
                                         }
@@ -624,3 +859,114 @@ fn spool_rec_ext_file_path(ext_rec_id: &str) -> Result<String, StoreError> {
 pub fn store_safe_time_now() -> Option<i32> {
     Instant::now().to_date_time().map(|date_time| date_time.timestamp() as i32)
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileMeta {
+    pub path: String,
+    pub length: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BackupMeta {
+    pub spoolease_console_ver: String,
+}
+
+// enum RestorerState {
+//     Header,
+//     FileInfo,
+//     File { file_path: String, total: usize, _stored: usize },
+// }
+//
+// struct Restorer {
+//     buffer: Vec<u8>,
+//     buf_len: usize,
+//     pub state: RestorerState,
+// }
+// impl Restorer {
+//     pub fn new() -> Self {
+//         Restorer {
+//             buffer: alloc::vec![0u8; 2048],
+//             buf_len: 0,
+//             state: RestorerState::Header,
+//         }
+//     }
+//     pub fn get_write_buf(&mut self) -> &mut [u8] {
+//         if self.buf_len + 2048 > self.buffer.len() {
+//             self.buffer.resize(self.buf_len + 2048, 0);
+//         }
+//         &mut self.buffer[self.buf_len..]
+//     }
+//     pub fn process_data(
+//         &mut self,
+//         n_added: usize,
+//         store: &sdcard_store::SDCardStore<TheSpi, 20, 5>,
+//         // root_dir: embedded_sdmmc::asynchronous::Directory<'_, SDCardStoreType>,
+//     ) -> Result<(), String> {
+//         self.buf_len += n_added;
+//         loop {
+//             let need_more_data = match &self.state {
+// RestorerState::Header => {
+//                     if let Some(pos) = self.buffer[..self.buf_len].iter().position(|&b| b == b'\n') {
+//                         match serde_json::from_slice::<BackupMeta>(&self.buffer[..pos]) {
+//                             Ok(_backup_meta) => {
+//                                 self.buffer.copy_within(pos + 1.., 0);
+//                                 self.buf_len -= pos + 1;
+//                                 self.state = RestorerState::FileInfo;
+//                                 false
+//                             }
+//                             Err(err) => {
+//                                 return Err(format!("Failed to deserialize backup meta: {err}"));
+//                             }
+//                         }
+//                     } else {
+//                         true
+//                     }
+//                 }
+//                 RestorerState::FileInfo => {
+//                     if let Some(pos) = self.buffer[..self.buf_len].iter().position(|&b| b == b'\n') {
+//                         match serde_json::from_slice::<FileMeta>(&self.buffer[..pos]) {
+//                             Ok(file_meta) => {
+//                                 self.state = RestorerState::File {
+//                                     file_path: file_meta.path,
+//                                     total: file_meta.length,
+//                                     _stored: 0,
+//                                 };
+//                                 self.buffer.copy_within(pos + 1.., 0);
+//                                 self.buf_len -= pos + 1;
+//                                 false
+//                             }
+//                             Err(err) => {
+//                                 error!("Error in: {:?}", &self.buffer[..pos]);
+//                                 error!("Error in: {}", core::str::from_utf8(&self.buffer[..pos]).unwrap_or("Not UTF8"));
+//                                 return Err(format!("Failed to deserialize file info: {err}"));
+//                             }
+//                         }
+//                     } else {
+//                         true
+//                     }
+//                 }
+//                 RestorerState::File {
+//                     file_path,
+//                     total,
+//                     _stored: _,
+//                 } => {
+//                     if self.buf_len < total + 1 {
+//                         // want also the \n added at end of file
+//                         true
+//                     } else {
+//                         debug!(">>>> writing: {file_path}, length: {total}");
+//                         debug!("{}", core::str::from_utf8(&self.buffer[..*total]).unwrap_or("Errror converting to UTF8"));
+//                         self.buffer.copy_within(total + 1.., 0);
+//                         self.buf_len -= total + 1;
+//                         self.state = RestorerState::FileInfo;
+//                         false
+//                     }
+//                 }
+//             };
+//             if need_more_data {
+//                 break;
+//             }
+//         }
+//         Ok(())
+//     }
+// }
