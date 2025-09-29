@@ -98,16 +98,16 @@ export component SpoolDisplay inherits Rectangle {
                 }
 
                 LabeledInfo {
-                    pure function calc-net(weight_new: int, weight_current: int, weight_core: int, weight_advertised: int) -> int {
+                    pure function calc-net(weight_new: int, weight_current: int, weight_core: int, weight_advertised: int, consumed_since_weight:float) -> int {
                         // code from inventory adjusted to here
-                        return weight_current != 0 && weight_core != 0
+                        return (weight_current != 0 && weight_core != 0
                           ? weight_current - weight_core
                           : (weight_current != 0 && weight_advertised != 0 && weight_new != 0
                             ? weight_current - (weight_new - weight_advertised)
-                            : 0);
+                            : 0)) - Math.round(consumed_since_weight*10)/10;
                       }
                     property <string> gross: spool-display.spool-record.weight-current > 0 ? "\{spool-display.spool-record.weight-current} g" : "—";
-                    property <int> net_value: calc-net(spool-display.spool-record.weight-new, spool-display.spool-record.weight-current, spool-display.spool-record.weight-core, spool-display.spool-record.weight-advertised);
+                    property <int> net_value: calc-net(spool-display.spool-record.weight-new, spool-display.spool-record.weight-current, spool-display.spool-record.weight-core, spool-display.spool-record.weight-advertised, spool-display.spool-record.consumed-since-weight);
                     property <string> net: net_value != 0 ? "\{net_value} g" : "—";
                     label: "";
                     text: "Net: \{net} / Gross: \{gross}";
