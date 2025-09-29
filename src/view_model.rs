@@ -543,7 +543,7 @@ impl ViewModel {
         self.ui_weak
             .unwrap()
             .global::<crate::app::AppBackend>()
-            .on_add_v1_tag_to_inventory(move |tag_id, tag| moved_view_model.borrow().ui_add_v1_tag_to_inventory(tag_id.as_str(), tag.as_str()));
+            .on_add_v1_tag_to_inventory(move |tag_id, tag, final_step| moved_view_model.borrow().ui_add_v1_tag_to_inventory(tag_id.as_str(), tag.as_str(), final_step));
 
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
         self.ui_weak
@@ -568,7 +568,6 @@ impl ViewModel {
             .unwrap()
             .global::<crate::app::AppBackend>()
             .on_untag_slot(move |tray_id| moved_view_model.borrow().ui_untag_slot(tray_id));
-
     }
 
     fn perform_select_printer(
@@ -777,7 +776,9 @@ impl ViewModel {
     }
 
     fn ui_untag_slot(&self, tray_id: i32) {
-        self.bambu_printer_model.borrow_mut().update_any_tray(tray_id as usize, |tray| tray.meta_info.spool_id = None);
+        self.bambu_printer_model
+            .borrow_mut()
+            .update_any_tray(tray_id as usize, |tray| tray.meta_info.spool_id = None);
         self.update_ui_from_printer(&self.bambu_printer_model.borrow());
     }
     fn ui_term_info(&self, text: &str) {
@@ -819,10 +820,11 @@ impl ViewModel {
         }
     }
 
-    fn ui_add_v1_tag_to_inventory(&self, tag_id: &str, tag: &str) {
+    fn ui_add_v1_tag_to_inventory(&self, tag_id: &str, tag: &str, final_step: bool) {
         let _ = self.dispatch_async_task(AppAsyncTaskRequest::ProcessV1TagRead {
             tag_id: tag_id.to_string(),
             tag: tag.to_string(),
+            final_step,
         });
     }
 
@@ -883,7 +885,7 @@ impl ViewModel {
         let available_in_spool = self.weight_left(tray).unwrap_or_default();
 
         let pa = match tray.cali_idx {
-            Some(-1)| Some(0) | None => {
+            Some(-1) | Some(0) | None => {
                 slint::format!("({})", tray.k_from_tray.unwrap_or(0.02))
             }
             Some(cali_idx) => {
@@ -1385,8 +1387,11 @@ impl ViewModel {
         }
     }
 
-    pub async fn process_v1_tag_read_async(view_model: Rc<RefCell<ViewModel>>, tag_id: String, tag: String) {
+    pub async fn process_v1_tag_read_async(view_model: Rc<RefCell<ViewModel>>, tag_id: String, tag: String, final_step: bool) {
         debug!("Received to process async read tag {tag}");
+
+        // TODO: Can there be here a flow that doesn't need to store a new tag?????
+        // I think not because if tag is available then not storing anything and not reaching here at all (to the async fn)
 
         // Using the real tag uid to store and not the content of the tag in this case
         if let Ok(tag_info) = TagInformationV1::from_v1_descriptor(&tag) {
@@ -1465,7 +1470,8 @@ impl ViewModel {
                             if let Some(spool_rec_ext) = spool_rec_ext {
                                 view_model_borrow.filament_staging.borrow_mut().set_spool_record_ext(spool_rec_ext);
                             }
-                            view_model.borrow().display_filament_staging(true);
+                            view_model.borrow().display_filament_staging(final_step);
+                            ui_app_state.invoke_add_v1_tag_to_inventory_status(SharedString::new(), spool_rec_id.to_shared_string());
                         } else {
                             ui_app_state.invoke_show_message_box(
                                 "Critical Store Notice".into(),
@@ -2466,6 +2472,7 @@ enum AppAsyncTaskRequest {
     ProcessV1TagRead {
         tag_id: String,
         tag: String,
+        final_step: bool,
     },
     LinkTagToSpool {
         tag_id: String,
@@ -2508,7 +2515,7 @@ pub async fn app_async_task(view_model: Rc<RefCell<ViewModel>>) {
 
     loop {
         match requests.receive().await {
-            AppAsyncTaskRequest::ProcessV1TagRead { tag_id, tag } => ViewModel::process_v1_tag_read_async(view_model.clone(), tag_id, tag).await,
+            AppAsyncTaskRequest::ProcessV1TagRead { tag_id, tag, final_step } => ViewModel::process_v1_tag_read_async(view_model.clone(), tag_id, tag, final_step).await,
             AppAsyncTaskRequest::LinkTagToSpool {
                 tag_id,
                 spool_id,

@@ -114,6 +114,7 @@ component V1TagPromptStep inherits Rectangle {
     width: 480px;
     height: 320px;
     property <NewTagOperation> selected-operation: None;
+    property <bool> last-step: !AppState.is-scale-usable-now();
     function pressed(operation: NewTagOperation) {
         selected-operation = selected-operation == operation ? NewTagOperation.None : operation;
     }
@@ -166,8 +167,8 @@ component V1TagPromptStep inherits Rectangle {
             }
             next-clicked => {
                 if selected-operation == NewTagOperation.AddV1TagToInventory {
-                    AppBackend.add-v1-tag-to-inventory(AppState.new-tag-scan-tag-id, AppState.new-tag-scan-v1-tag);
-                    AppState.control-state = ControlState.Ready;
+                    AppBackend.add-v1-tag-to-inventory(AppState.new-tag-scan-tag-id, AppState.new-tag-scan-v1-tag, last-step);
+                    // AppState.control-state = ControlState.Ready;
                 } else {
                     AppBackend.erase-tag(AppState.new-tag-scan-tag-id);
                     AppState.control-state = ControlState.Ready;

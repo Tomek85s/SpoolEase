@@ -148,7 +148,7 @@ export global AppBackend {
     pure callback get-spool-record-display(spool-id: string) -> UiSpoolRecordDisplay;
     pure callback get-slot-display(tray-id: int) -> UiSlotDisplay;
     callback can-link-spool-to-tag(id: string) -> string; // empty if untagged, error text if not
-    callback add-v1-tag-to-inventory(tag_id: string, tag_descriptor: string);
+    callback add-v1-tag-to-inventory(tag_id: string, tag_descriptor: string, final-step: bool);
     callback erase-tag(tag_id: string);
     callback erase-tag-by-spool-id(id: string);
     callback untag-slot(tray-id: int);
@@ -377,7 +377,7 @@ export global AppState {
     public function updated-spool-weight(spool-id: string, from_button: bool) {
         self.show-message-box("Inventory Notice", "Updated Spool \{spool-id} Weight", "", StatusType.Success, -1);
         if !from_button && (self.control-state == ControlState.StagingSelected || self.control-state == ControlState.NewTagScan) {
-          self.control-state = ControlState.Ready;
+            self.control-state = ControlState.Ready;
         }
     }
 
@@ -583,7 +583,23 @@ export global AppState {
       if self.control-state == ControlState.NewTagScan {
             if status == "" {
           // this will be effective only if there is a weight (this will be driven by the flow in the screen itself)
-          self.new-tag-scan-page = NewTagScanPage.UpdateWeight;
+                self.new-tag-scan-page = NewTagScanPage.UpdateWeight;
+            } else {
+                self.new-tag-scan-page = NewTagScanPage.StatusDisplay;
+                self.new-tag-scan-status = status;
+            }
+        }
+    }
+
+    public function add-v1-tag-to-inventory-status(status: string, spool-id: string) {
+      // This one is called both from link_tag and from v1_tag add new tag flows
+      // string empty ok, content is error message
+
+      if self.control-state == ControlState.NewTagScan {
+            if status == "" {
+          // this will be effective only if there is a weight (this will be driven by the flow in the screen itself)
+                self.new-tag-scan-spool-id = spool-id;
+                self.new-tag-scan-page = NewTagScanPage.UpdateWeight;
             } else {
                 self.new-tag-scan-page = NewTagScanPage.StatusDisplay;
                 self.new-tag-scan-status = status;
