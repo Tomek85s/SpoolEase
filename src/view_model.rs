@@ -2087,7 +2087,7 @@ impl TerminalObserver for TerminalViewModel {
         let keep_from = self
             .term_text
             .match_indices('\n')
-            .nth_back(100) // nth newline from the end
+            .nth_back(50) // nth newline from the end
             .map(|(i, _)| i + 1) // start after it
             .unwrap_or(0);
         self.term_text.drain(..keep_from);
@@ -2301,7 +2301,18 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
     loop {
         if printer_index < num_of_printers {
             let printer = view_model.borrow().bambu_printer_model.printers[printer_index].clone();
-            BambuPrinter::store_printer_state(&framework, &printer).await;
+            let num_retries = 3;
+            for retry in 1..=num_retries {
+                match BambuPrinter::store_printer_state(&framework, &printer, &view_model).await {
+                    Ok(_) => break,
+                    Err(err) => {
+                        if retry == num_retries {
+                            view_model.borrow().message_box("State Store Error", "Failed All Retries Storing State", "Please report on Github/Discord !!!", crate::app::StatusType::Error, 0);
+                            error!("[{}] Failed all retries trying to store printer restart state : {err}", printer.borrow().printer_number);
+                        }
+                    }
+                }
+            }
         }
         Timer::after_millis(delay_time).await;
         printer_index += 1;

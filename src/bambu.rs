@@ -341,14 +341,15 @@ impl BambuPrinter {
         }
     }
 
-    pub async fn store_printer_state(framework: &Rc<RefCell<Framework>>, printer: &Rc<RefCell<BambuPrinter>>) {
+    // Ok(true) - saved, Ok(false) nothing to save
+    pub async fn store_printer_state(framework: &Rc<RefCell<Framework>>, printer: &Rc<RefCell<BambuPrinter>>, view_model: &Rc<RefCell<crate::view_model::ViewModel>>) -> Result<bool, String> {
         let mut printer_state_str = None;
         let mut printer_serial = None;
         {
             let printer_borrow = printer.borrow();
             if printer_borrow.auto_restore_k && printer_borrow.pending_k_restore_sequence {
                 // don't change store until restoring k is done
-                return;
+                return Ok(false);
             }
             let ams_trays_dirty = printer_borrow.ams_trays_dirty.iter().any(|&v| v);
 
@@ -389,9 +390,15 @@ impl BambuPrinter {
             // need to clean dirty before we store since it awaits,
             // but store might fail, and in that case we need to bring back dirty (add the dirty we had)
             // so let's save it to bring back in case of error
-            let ams_trays_dirty = printer.borrow().ams_trays_dirty;
             let virt_tray_dirty = printer.borrow().virt_tray_dirty;
+            let ams_trays_dirty = printer.borrow().ams_trays_dirty;
             let nozzle_diameter_dirty = printer.borrow().nozzle_diameter_dirty;
+            let ams_exist_bits_dirty =printer.borrow().ams_exist_bits_dirty;
+            let tray_exist_bits_dirty = printer.borrow().tray_exist_bits_dirty;
+            let tray_read_done_bits_dirty = printer.borrow().tray_read_done_bits_dirty;
+            let calibrations_dirty = printer.borrow().calibrations_dirty;
+            let printer_name_dirty = printer.borrow().printer_name_dirty;
+
             printer.borrow_mut().virt_tray_dirty = false;
             printer.borrow_mut().ams_trays_dirty.fill(false);
             printer.borrow_mut().nozzle_diameter_dirty = false;
@@ -403,7 +410,9 @@ impl BambuPrinter {
             printer.borrow_mut().force_store_state = false;
             let mut file_store = file_store.lock().await;
             match file_store.create_write_file_str(&path, &printer_state_str).await {
-                Ok(_) => {}
+                Ok(_) => {
+                    Ok(true)
+                }
                 Err(err) => {
                     let mut printer_borrow = printer.borrow_mut();
                     printer_borrow.virt_tray_dirty |= virt_tray_dirty;
@@ -411,11 +420,22 @@ impl BambuPrinter {
                         *x |= *y
                     }
                     printer_borrow.nozzle_diameter_dirty |= nozzle_diameter_dirty;
+                    printer_borrow.ams_exist_bits_dirty = ams_exist_bits_dirty;
+                    printer_borrow.tray_exist_bits_dirty = tray_exist_bits_dirty;
+                    printer_borrow.tray_read_done_bits_dirty = tray_read_done_bits_dirty;
+                    printer_borrow.calibrations_dirty = calibrations_dirty;
+                    printer_borrow.printer_name_dirty = printer_name_dirty;
+                    printer_borrow.force_store_state = true; // is is set to true in case we miss something or forget in the future
                     error!("[{}] Failed to store printer restart state : {err}", printer_borrow.printer_number);
+                    view_model.borrow().message_box("State Store Error", "Unexpected Error Storing State, Will Retry", "Please report on Github/Discord !!!", crate::app::StatusType::Error, 0);
+                    Err(String::from("Error storing state : {err}"))
                 }
             }
+        } else {
+            Ok(false)
         }
     }
+
     pub fn printer_state_file_path(printer_serial: &str) -> String {
         let len = printer_serial.len();
         let file_ext = &printer_serial[len - 3..];
