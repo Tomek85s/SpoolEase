@@ -105,18 +105,27 @@ component OperationSelectionStep inherits Rectangle {
                     text: "Configure from Staging";
                     clicked => {
                         AppBackend.set-staging-to-tray(tray-index);
+                        AppState.control-state = ControlState.Ready;
                     }
                 }
 
+                MyButton {
+                    text: "Reset Slot";
+                    clicked => {
+                        AppBackend.untag-slot(AppState.trays-state[tray-index].id);
+                        AppBackend.reset-slot(AppState.trays-state[tray-index].id);
+                        AppState.control-state = ControlState.Ready;
+                    }
+                }
+            }
+
+            Row {
                 MyButton {
                     visible: false;
                     text: "Unload Filament";
                     clicked => {
                     }
                 }
-            }
-
-            Row {
                 MyButton { // just to have a second row
                   visible: false;
                 }

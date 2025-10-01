@@ -572,6 +572,12 @@ impl ViewModel {
             .unwrap()
             .global::<crate::app::AppBackend>()
             .on_untag_slot(move |tray_id| moved_view_model.borrow().ui_untag_slot(tray_id));
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
+            .on_reset_slot(move |tray_id| moved_view_model.borrow().ui_reset_slot(tray_id));
     }
 
     fn perform_select_printer(
@@ -784,6 +790,12 @@ impl ViewModel {
         self.bambu_printer_model
             .borrow_mut()
             .update_any_tray(tray_id as usize, |tray| tray.meta_info.spool_id = None);
+        self.update_ui_from_printer(&self.bambu_printer_model.borrow());
+    }
+    fn ui_reset_slot(&self, tray_id: i32) {
+        self.bambu_printer_model
+            .borrow_mut()
+            .reset_tray(tray_id);
         self.update_ui_from_printer(&self.bambu_printer_model.borrow());
     }
     fn ui_term_info(&self, text: &str) {

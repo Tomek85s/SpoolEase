@@ -342,7 +342,11 @@ impl BambuPrinter {
     }
 
     // Ok(true) - saved, Ok(false) nothing to save
-    pub async fn store_printer_state(framework: &Rc<RefCell<Framework>>, printer: &Rc<RefCell<BambuPrinter>>, view_model: &Rc<RefCell<crate::view_model::ViewModel>>) -> Result<bool, String> {
+    pub async fn store_printer_state(
+        framework: &Rc<RefCell<Framework>>,
+        printer: &Rc<RefCell<BambuPrinter>>,
+        view_model: &Rc<RefCell<crate::view_model::ViewModel>>,
+    ) -> Result<bool, String> {
         let mut printer_state_str = None;
         let mut printer_serial = None;
         {
@@ -393,7 +397,7 @@ impl BambuPrinter {
             let virt_tray_dirty = printer.borrow().virt_tray_dirty;
             let ams_trays_dirty = printer.borrow().ams_trays_dirty;
             let nozzle_diameter_dirty = printer.borrow().nozzle_diameter_dirty;
-            let ams_exist_bits_dirty =printer.borrow().ams_exist_bits_dirty;
+            let ams_exist_bits_dirty = printer.borrow().ams_exist_bits_dirty;
             let tray_exist_bits_dirty = printer.borrow().tray_exist_bits_dirty;
             let tray_read_done_bits_dirty = printer.borrow().tray_read_done_bits_dirty;
             let calibrations_dirty = printer.borrow().calibrations_dirty;
@@ -410,9 +414,7 @@ impl BambuPrinter {
             printer.borrow_mut().force_store_state = false;
             let mut file_store = file_store.lock().await;
             match file_store.create_write_file_str(&path, &printer_state_str).await {
-                Ok(_) => {
-                    Ok(true)
-                }
+                Ok(_) => Ok(true),
                 Err(err) => {
                     let mut printer_borrow = printer.borrow_mut();
                     printer_borrow.virt_tray_dirty |= virt_tray_dirty;
@@ -427,7 +429,13 @@ impl BambuPrinter {
                     printer_borrow.printer_name_dirty = printer_name_dirty;
                     printer_borrow.force_store_state = true; // is is set to true in case we miss something or forget in the future
                     error!("[{}] Failed to store printer restart state : {err}", printer_borrow.printer_number);
-                    view_model.borrow().message_box("State Store Error", "Unexpected Error Storing State, Will Retry", "Please report on Github/Discord !!!", crate::app::StatusType::Error, 0);
+                    view_model.borrow().message_box(
+                        "State Store Error",
+                        "Unexpected Error Storing State, Will Retry",
+                        "Please report on Github/Discord !!!",
+                        crate::app::StatusType::Error,
+                        0,
+                    );
                     Err(String::from("Error storing state : {err}"))
                 }
             }
@@ -1541,6 +1549,56 @@ impl BambuPrinter {
         res
     }
 
+    pub fn reset_tray(&mut self, tray_id: i32) {
+        if self.is_locked() {
+            return;
+        }
+        let ams_id;
+        let ams_tray_id;
+        let slot_id;
+        let original_tray_id;
+
+        (ams_id, ams_tray_id) = Self::get_ams_and_tray_id(tray_id as usize);
+
+        if tray_id < 16 {
+            // AMS
+            slot_id = ams_tray_id as i32;
+            original_tray_id = tray_id;
+        } else if tray_id < 16 + 8 {
+            // AMS-HT
+            slot_id = 0;
+            original_tray_id = (ams_id * 4 + ams_tray_id) as i32; // seems like this is what Bambustudio is placing there (so 512 for first HT, others are assumed)
+        } else {
+            // external
+            slot_id = 0;
+            original_tray_id = 254;
+        }
+        let cmd = crate::bambu_api::AmsFilamentSettingCommand::new(
+            ams_id as i32,
+            ams_tray_id as i32, // here we need the tray_id within the specific ams (newer versions)
+            slot_id,            // slot number within ams
+            &"",
+            Some(""),
+            "",
+            "",
+            0,
+            0,
+        );
+        let payload = serde_json::to_string_pretty(&cmd).unwrap();
+        self.publish_payload(payload);
+
+        let cmd = crate::bambu_api::ExtrusionCaliSelCommand::new(
+            &self.nozzle_diameter().clone().unwrap_or_default(),
+            ams_id as i32,
+            original_tray_id, // here we need the original tray_id
+            slot_id,
+            "", // tray_info_idx is filament_id in this command
+            Some(-1),
+        );
+        let payload = serde_json::to_string_pretty(&cmd).unwrap();
+        self.publish_payload(payload);
+    }
+
     pub fn set_tray_filament(&mut self, tray_id: i32, full_spool_rec: &FullSpoolRecord, temp_min: u32, temp_max: u32) {
         if self.is_locked() {
             return;
@@ -1586,8 +1644,8 @@ impl BambuPrinter {
         if filament_ok_to_send {
             let cmd = crate::bambu_api::AmsFilamentSettingCommand::new(
                 ams_id as i32,
-                ams_tray_id as i32,     // here we need the tray_id within the specific ams (newer versions)
-                slot_id,                // slot number within ams
+                ams_tray_id as i32, // here we need the tray_id within the specific ams (newer versions)
+                slot_id,            // slot number within ams
                 &filament.tray_info_idx,
                 setting_id,
                 &filament.tray_type,
@@ -1601,7 +1659,7 @@ impl BambuPrinter {
             let cmd = crate::bambu_api::ExtrusionCaliSelCommand::new(
                 &self.nozzle_diameter().clone().unwrap_or_default(),
                 ams_id as i32,
-                original_tray_id,         // here we need the original tray_id
+                original_tray_id, // here we need the original tray_id
                 slot_id,
                 &filament.tray_info_idx, // tray_info_idx is filament_id in this command
                 if let Some(calibration) = &matching_calibration {
