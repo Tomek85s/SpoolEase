@@ -104,7 +104,7 @@ component OperationSelectionStep inherits Rectangle {
                     enabled: AppState.spool-staging-state != SpoolStagingState.Empty;
                     text: "Configure from Staging";
                     clicked => {
-                        AppBackend.set-staging-to-tray(tray-index);
+                        AppBackend.set-staging-to-tray(AppState.trays-state[tray-index].id);
                         AppState.control-state = ControlState.Ready;
                     }
                 }
