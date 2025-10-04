@@ -533,7 +533,7 @@ pub async fn spool_scale_task(
 
         'send_recv_loop: loop {
             // max timeout_for_ping need to be less than above WithTimeout wrapper
-            let timeout_for_ping = (random_u32() % 5000) + 5000;
+            let timeout_for_ping = 12000 + (random_u32() % 2000);
             let with_timeout_res = select3(
                 Timer::after_millis(timeout_for_ping as u64),
                 FrameHeader::recv(&mut socket),
