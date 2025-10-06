@@ -54,10 +54,10 @@ component AmsButton inherits Window {
                     border-color: black;
                     border-width: 1px;
                     MyText {
-                      // The "✓" is hidden for all texts to have something, otherwise the width of the rectangles become different for some reason
-                      // only thing I didn't try to fix that with empty or space is centering the text which already looks centered
-                      // and so the "✓" won't show, use transparent color
-                      text: slot-is-loaded ? "↯" : !slot-is-with-spool ? "−" : !slot-is-with-known-color ? "?" : "✓";
+                        // The "✓" is hidden for all texts to have something, otherwise the width of the rectangles become different for some reason
+                        // only thing I didn't try to fix that with empty or space is centering the text which already looks centered
+                        // and so the "✓" won't show, use transparent color
+                        text: !slot-is-with-spool ? "−" : !slot-is-with-known-color ? "?" : "✓";
                         color: self.text == "✓" ? #00000000 : !slot-is-with-spool ? black : slot-is-with-known-color ? Utils.contrasting_color(block.background) : white;
                     }
                 }
@@ -69,6 +69,10 @@ component AmsButton inherits Window {
                     height: parent.height + 4px;
                     border-width: 2px;
                     border-color: black;
+                }
+                if slot-is-loaded: Image {
+                    source: @image-url("./img/extruder.png");
+                    colorize: Utils.contrasting_color(block.background);
                 }
             }
         }
@@ -101,7 +105,7 @@ component Spool inherits Rectangle {
             background: tray-state.spool-state == UiTrayState.Unknown || tray-state.spool-state == UiTrayState.Empty || tray-state.spool-state == UiTrayState.Spool || tray-state.spool-state == UiTrayState.Reading || tray-state.filament.state == UiFilamentState.Unknown ? #fff : tray-state.filament.color;
             border-radius: root.width / 2;
             border-color: Utils.contrasting_color(root.background);
-            border-width: area.pressed || tray-state.spool-state == UiTrayState.Loaded ? 4px : 2px;
+            border-width: area.pressed ? 4px : 2px;
             property <string> default-big-text: tray-state.spool-state == UiTrayState.Unknown ? "?" : tray-state.spool-state == UiTrayState.Empty ? "−" : tray-state.spool-state == UiTrayState.Spool ? "↺" : tray-state.spool-state == UiTrayState.Reading ? "↻" : "✓";
             property <bool> display-weight: default-big-text == "✓" && tray-state.weight-display != "";
 
@@ -114,6 +118,12 @@ component Spool inherits Rectangle {
             if display-weight: MyText {
                 text: tray-state.weight-display;
                 color: Utils.contrasting_color(parent.background);
+            }
+
+            if tray-state.spool-state == UiTrayState.Loaded: Image {
+                y: circle.height / 2 + 15px;
+                source: @image-url("./img/extruder.png");
+                colorize: Utils.contrasting_color(parent.background);
             }
         }
 
@@ -138,8 +148,8 @@ component Spool inherits Rectangle {
 
     tray-border := Rectangle {
         // when to set border thick
-        border-width: area.pressed || (AppState.control-state == ControlState.TraySelect)  ? 4px : 1px;
-        border-color: AppState.control-state == ControlState.TraySelect ? (AppState.highlight-trays ? black : white)  :  self.border-width == 1px ? black : Utils.contrasting_color(root.background);
+        border-width: area.pressed || (AppState.control-state == ControlState.TraySelect) ? 4px : 1px;
+        border-color: AppState.control-state == ControlState.TraySelect ? (AppState.highlight-trays ? black : white) : self.border-width == 1px ? black : Utils.contrasting_color(root.background);
     }
 
     if tray-state.tagged: tag := Rectangle {
