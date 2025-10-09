@@ -1747,6 +1747,14 @@ impl BambuPrinter {
         }
     }
 
+    pub fn add_calibration_to_printer(&mut self, extruder_id: i32, nozzle_diameter: &str,nozzle_id: &str, filament_id: &str, setting_id: &str, k_value: &str, name: &str) {
+        let cmd = crate::bambu_api::ExtrusionCaliSetCommand::new(
+            extruder_id, nozzle_diameter, nozzle_id, filament_id, setting_id, k_value, name
+        );
+        let payload = serde_json::to_string_pretty(&cmd).unwrap();
+        self.publish_payload(payload);
+    }
+
     pub fn get_matching_printer_calibration_for_current_nozzle(&self, full_spool_rec: &FullSpoolRecord) -> Option<Calibration> {
         // cali_idx, setting_id
         // Now process it

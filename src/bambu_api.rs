@@ -1,4 +1,8 @@
-use alloc::{format, string::String, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 // ==========================================================================
@@ -10,9 +14,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[allow(clippy::large_enum_variant)]
 pub enum Message {
     Print(Print),
-    Info(Info)
+    Info(Info),
 }
-
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Print {
@@ -491,6 +494,83 @@ impl ExtrusionCaliSelCommand {
 //   }
 // }
 
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtrusionCaliSetFilament {
+    // this is really calibrations, not filaments
+    pub ams_id: i32,
+    pub extruder_id: i32,
+    pub filament_id: String,
+    pub k_value: String,
+    pub n_coef: String, // doen't exist in H2D
+    pub name: String,
+    pub nozzle_diameter: String,
+    pub nozzle_id: String,
+    pub setting_id: String,
+    pub slot_id: i32,
+    pub tray_id: i32, // ??? why is it here? In extrusion_cali_set it can exist (case when adding new calibration)
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtrusionCaliSetCommand {
+    print: ExtrusionCaliSet,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtrusionCaliSet {
+    pub command: String, // extrusion_cali_sel
+    pub filaments: Vec<ExtrusionCaliSetFilament>,
+    pub nozzle_diameter: String,
+    pub sequence_id: String,
+}
+
+impl ExtrusionCaliSetCommand {
+    pub fn new(extruder_id: i32, nozzle_diameter: &str,nozzle_id: &str, filament_id: &str, setting_id: &str, k_value: &str, name: &str) -> Self {
+        let filaments = alloc::vec![ExtrusionCaliSetFilament {
+            ams_id: 0,
+            extruder_id,
+            filament_id: filament_id.to_string(),
+            k_value: k_value.to_string(),
+            n_coef: "0.000000".to_string(),
+            name: name.to_string(),
+            nozzle_diameter: nozzle_diameter.to_string(),
+            nozzle_id: nozzle_id.to_string(),
+            setting_id: setting_id.to_string(),
+            slot_id: 0,
+            tray_id: -1,
+        }];
+        Self {
+            print: ExtrusionCaliSet {
+                command: String::from("extrusion_cali_set"),
+                filaments,
+                nozzle_diameter: nozzle_diameter.to_string(),
+                sequence_id: "1".to_string(),
+            },
+        }
+    }
+}
+
+// {
+//     "print":{
+//         "command":"extrusion_cali_set",
+//         "filaments":[
+//             {
+//                 "ams_id":0,
+//                 "extruder_id":0,
+//                 "filament_id":"Pb79127b",
+//                 "k_value":"0.123000",
+//                 "n_coef":"0.000000",
+//                 "name":"setting-name",
+//                 "nozzle_diameter":"0.4",
+//                 "nozzle_id":"HS00-0.4",
+//                 "setting_id":"PFUSced7c16e6d1066",
+//                 "slot_id":0,
+//                 "tray_id":-1}
+//         ],
+//         "nozzle_diameter":"0.4",
+//         "sequence_id":"21930",
+//     }
+// }
+
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 pub struct AmsMapping2Entry {
     pub ams_id: i32,
@@ -510,7 +590,6 @@ pub enum GcodeState {
     #[serde(other)]
     Unsupported,
 }
-
 
 // {
 //     "info": {
@@ -545,7 +624,6 @@ impl GetVersionCommand {
 //  }
 // }
 
-
 //////////////////////////////////////////////////////////////////////////////
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Info {
@@ -574,17 +652,14 @@ pub struct InfoModule {
     pub ota_ver: Option<String>,
 }
 
-
-
-// { "info": { "command": "get_version", "module": [ 
-//     { "flag": 3, "hw_ver": "N/A", "name": "ota", "sn": "N/A", "sw_ver": "01.08.02.00" }, 
-//     { "flag": 0, "hw_ver": "AMS08", "name": "ams/0", "sn": "00600A452223458", "sw_ver": "00.00.06.44" }, 
-//     { "flag": 0, "hw_ver": "MC07", "name": "mc", "sn": "00206A442501491", "sw_ver": "00.00.27.26" }, 
-//     { "flag": 0, "hw_ver": "SMC01", "name": "sm", "sn": "N/A", "sw_ver": "00.00.27.26" }, 
-//     { "flag": 0, "hw_ver": "TH09", "name": "th", "sn": "00306D441004413", "sw_ver": "00.00.07.12" }, 
-//     { "flag": 0, "hw_ver": "AP05", "name": "ap", "sn": "00M09D460801484", "sw_ver": "00.00.32.39" } ], 
+// { "info": { "command": "get_version", "module": [
+//     { "flag": 3, "hw_ver": "N/A", "name": "ota", "sn": "N/A", "sw_ver": "01.08.02.00" },
+//     { "flag": 0, "hw_ver": "AMS08", "name": "ams/0", "sn": "00600A452223458", "sw_ver": "00.00.06.44" },
+//     { "flag": 0, "hw_ver": "MC07", "name": "mc", "sn": "00206A442501491", "sw_ver": "00.00.27.26" },
+//     { "flag": 0, "hw_ver": "SMC01", "name": "sm", "sn": "N/A", "sw_ver": "00.00.27.26" },
+//     { "flag": 0, "hw_ver": "TH09", "name": "th", "sn": "00306D441004413", "sw_ver": "00.00.07.12" },
+//     { "flag": 0, "hw_ver": "AP05", "name": "ap", "sn": "00M09D460801484", "sw_ver": "00.00.32.39" } ],
 //     "sequence_id": "20006" } }[0m
-
 
 // {"info":{"command":"get_version","sequence_id":"47663","module":[
 //     {"name":"ota","sw_ver":"01.08.01.00","hw_ver":"OTA","loader_ver":"00.00.00.00","sn":"01P00A3A2900822","product_name":"Bambu Lab P1S","visible":true,"new_ver":"01.08.02.00","flag":15},
@@ -594,11 +669,10 @@ pub struct InfoModule {
 //     {"name":"ams/0","sw_ver":"00.01.06.62","hw_ver":"AMS08","loader_ver":"00.00.00.00","sn":"00600A3A1903180","product_name":"AMS (1)","visible":true,"flag":0},
 //     {"name":"ams/1","sw_ver":"00.01.06.62","hw_ver":"AMS08","loader_ver":"00.00.00.00","sn":"00600A482719744","product_name":"AMS (2)","visible":true,"flag":0}],"result":"success","reason":""}}[0m
 
-
-// { "info": { "command": "get_version", "module": [ 
-//     { "flag": 3, "hw_ver": "N/A", "loader_ver": "00.00.00.00", "name": "ota", "product_name": "Bambu Lab X1-Carbon", "sn": "00M09D492100781", "sw_ver": "01.10.00.00", "visible": true }, 
-//     { "flag": 0, "hw_ver": "N3F05", "loader_ver": "00.00.00.00", "name": "n3f/0", "product_name": "AMS 2 Pro (1)", "sn": "19C06A4B2408067", "sw_ver": "02.00.19.68", "visible": true }, 
-//     { "flag": 0, "hw_ver": "MC07", "loader_ver": "00.00.00.28", "name": "mc", "product_name": "", "sn": "00206A482312627", "sw_ver": "00.00.32.96", "visible": false }, 
-//     { "flag": 0, "hw_ver": "N/A", "loader_ver": "00.00.00.00", "name": "mc-sub", "product_name": "", "sn": "N/A", "sw_ver": "00.00.32.96", "visible": false }, 
-//     { "flag": 0, "hw_ver": "TH09", "loader_ver": "00.00.00.14", "name": "th", "product_name": "", "sn": "00306D483105759", "sw_ver": "00.00.07.12", "visible": false }, 
+// { "info": { "command": "get_version", "module": [
+//     { "flag": 3, "hw_ver": "N/A", "loader_ver": "00.00.00.00", "name": "ota", "product_name": "Bambu Lab X1-Carbon", "sn": "00M09D492100781", "sw_ver": "01.10.00.00", "visible": true },
+//     { "flag": 0, "hw_ver": "N3F05", "loader_ver": "00.00.00.00", "name": "n3f/0", "product_name": "AMS 2 Pro (1)", "sn": "19C06A4B2408067", "sw_ver": "02.00.19.68", "visible": true },
+//     { "flag": 0, "hw_ver": "MC07", "loader_ver": "00.00.00.28", "name": "mc", "product_name": "", "sn": "00206A482312627", "sw_ver": "00.00.32.96", "visible": false },
+//     { "flag": 0, "hw_ver": "N/A", "loader_ver": "00.00.00.00", "name": "mc-sub", "product_name": "", "sn": "N/A", "sw_ver": "00.00.32.96", "visible": false },
+//     { "flag": 0, "hw_ver": "TH09", "loader_ver": "00.00.00.14", "name": "th", "product_name": "", "sn": "00306D483105759", "sw_ver": "00.00.07.12", "visible": false },
 //     { "flag": 0, "hw_ver": "AP05", "loader_ver": "00.00.01.08", "name": "ap", "product_name": "", "sn": "00M09D492100781", "sw_ver": "00.00.51.09", "visible": false } ], "sequence_id": "20034" } }

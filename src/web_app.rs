@@ -434,6 +434,29 @@ impl AppWithStateBuilder for NestedAppBuilder {
         );
 
         let router = router.route(
+            "/api/add-printer-pa",
+            post(
+                move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, add_pa: AddPressureAdvanceDTO| {
+                    ready({
+                        match state.0.view_model.borrow_mut().add_calibration_to_printer(
+                            &add_pa.printer_serial,
+                            add_pa.pressure_advance_entry.extruder,
+                            &add_pa.pressure_advance_entry.diameter,
+                            &add_pa.pressure_advance_entry.nozzle_id,
+                            &add_pa.filament_id,
+                            &add_pa.pressure_advance_entry.setting_id.unwrap_or_default(),
+                            &add_pa.pressure_advance_entry.k_value,
+                            &add_pa.pressure_advance_entry.name,
+                        ) {
+                            Ok(_) => GenericResonse { text: "Sent Pressure Advance Add Request to Printer".to_string()}.encrypt(&key.borrow()),
+                            Err(err) => GenericResonse { text: err }.encrypt(&key.borrow())
+                        }
+                    })
+                },
+            ),
+        );
+
+        let router = router.route(
             "/api/spool-kinfo",
             post(
                 async move |State(Encryption(key)): State<Encryption>, state: State<ConsoleAppState>, get_spool_kinfo: GetSpoolKInfoDTO| {
@@ -875,6 +898,20 @@ pub struct GetSpoolKInfoDTOResponse {
 pub struct GetSpoolsInPrintersResponse {
     pub spools: HashMap<String, String>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddPressureAdvanceDTO {
+    printer_serial: String,
+    filament_id: String,
+    pressure_advance_entry: PressureAdvanceEntry,
+}
+encrypted_input!(AddPressureAdvanceDTO);
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GenericResonse {
+    text: String,
+}
+encrypted_input!(GenericResonse);
 
 /////////////////////////////////////////////
 

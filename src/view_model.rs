@@ -1849,6 +1849,24 @@ impl ViewModel {
         }
         locations
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_calibration_to_printer(&self, printer_serial: &str, extruder_id: i32, nozzle_diameter: &str,nozzle_id: &str, filament_id: &str, setting_id: &str, k_value: &str, name: &str) -> Result<(), String> {
+        let mut found_printer = false;
+        for printer in &self.bambu_printer_model.printers {
+            let mut printer_borrow = printer.borrow_mut();
+            if printer_borrow.printer_serial == printer_serial {
+                printer_borrow.add_calibration_to_printer(extruder_id, nozzle_diameter, nozzle_id, filament_id, setting_id, k_value, name);
+                found_printer = true;
+                break;
+            }
+        }
+        if found_printer {
+            Ok(())
+        } else {
+            Err("Printer not found".to_string())
+        }
+    }
 }
 
 impl From<&TrayState> for crate::app::UiTrayState {
