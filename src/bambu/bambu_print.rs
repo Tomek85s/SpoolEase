@@ -731,9 +731,10 @@ impl BambuPrinter {
         let consume_index_state_str = if let Some(curr_print_project) = &printer.borrow().curr_print_project {
                 serde_json::to_string(&ConsumeIndexState { rev: consume_store_counter, value: curr_print_project.consume_index() }).unwrap()
         } else {
-            let err_str = format!("[{printer_log_id}] Internal Error: store_consume_index_state called without curr_print_project");
-            error!("{err_str}");
-            return Err(err_str);
+            // project ended by now
+            // let err_str = format!("[{printer_log_id}] Internal Error: store_consume_index_state called without curr_print_project");
+            // error!("{err_str}");
+            return Ok(());
         };
 
         let consume_index_path = printer.borrow().printer_state_path_for_file(&format!("print.ci{}", consume_store_counter%2));
