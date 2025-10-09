@@ -188,6 +188,7 @@ impl ViewModel {
         let ui = self.ui_weak.unwrap();
         let ui_app_state: crate::app::AppState<'_> = ui.global::<crate::app::AppState>();
         ui_app_state.invoke_show_message_box(title.into(), text.into(), text2.into(), status_type, timeout);
+        self.framework.borrow().undim_display();
     }
 
     pub fn init_only_if_sdcard_init_ok(&mut self) {
