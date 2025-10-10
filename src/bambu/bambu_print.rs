@@ -619,6 +619,7 @@ impl BambuPrinter {
             let mut at_least_one_parsed = false;
             for i in 0..=1 {
                 let consume_index_path = printer.borrow().printer_state_path_for_file(&format!("print.ci{i}"));
+                info!("Trying to read file {consume_index_path}");
                 #[allow(clippy::single_match)]
                 match file_store.read_file_str(&consume_index_path).await {
                     Ok(consume_index_str) => {
@@ -632,6 +633,7 @@ impl BambuPrinter {
                             }
                             Err(err) => {
                                 error!("Error parsing consume index file {consume_index_path}{} : {err}", if i == 0 {", trying second one"} else {""});
+                                error!("File {consume_index_path} contains '{consume_index_str}'");
                             }
                         }
                     }
