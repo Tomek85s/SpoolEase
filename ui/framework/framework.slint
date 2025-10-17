@@ -1,5 +1,6 @@
 export enum OtaState {
   NotStarted,
+  Checking,
   UserInput,
   Started,
   Completed,
@@ -78,6 +79,7 @@ export global FrameworkState {
     in-out property <string> web-config-key: "";
 
     in-out property <OtaState> ota-state: OtaState.NotStarted;
+    in-out property <bool> ota-allow-close-during-update: false;
     in-out property <ResetWifiCredentialsState> reset-wifi-credentials-state: ResetWifiCredentialsState.NotStarted;
     in-out property <ResetFixedSecurityKeyState> reset-fixed-security-key-state: ResetFixedSecurityKeyState.NotStarted;
     in-out property <RestartDeviceState> restart-device-state: RestartDeviceState.NotStarted;
@@ -106,12 +108,19 @@ export global FrameworkState {
         self.ota-message = text;
     }
     public function ota-completed(text: string) {
-        self.ota-state = OtaState.Completed;
+        if self.ota-state != OtaState.NotStarted {
+            self.ota-state = OtaState.Completed;
+        }
         self.ota-message = text;
     }
     public function ota-failed(text: string) {
-        self.ota-state = OtaState.Failed;
+        if self.ota-state != OtaState.NotStarted {
+            self.ota-state = OtaState.Failed;
+        }
         self.ota-message = text;
+    }
+    public function ota-clear-message() {
+        self.ota-message = "";
     }
 
     // Web Config

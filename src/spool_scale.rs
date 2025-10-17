@@ -27,7 +27,8 @@ use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 use shared::{
     gcode_analysis_task::{FilamentUsage, GcodeAnalysisNotification, GcodeAnalysisRequest},
-    scale::{ConsoleToScale, ScaleToConsole},
+    scale::{ConsoleToScale, OtaProgressUpdate, ScaleToConsole},
+    types::AppOtaTrain,
 };
 
 use crate::{app_config::AppConfig, ssdp::SSDPPubSubChannel};
@@ -67,9 +68,13 @@ pub trait SpoolScaleObserver {
     fn on_gcode_analysis_failed(&mut self, job_number: i32, printer_index: usize);
     fn on_gcode_analysis_canceled(&mut self, job_number: i32, printer_index: usize);
     fn on_gcode_analysis_completed(&mut self, job_number: i32, printer_index: usize);
+    fn on_scale_version(&mut self, scale_version: &str);
+    fn on_ota_progress_update(&mut self, update: OtaProgressUpdate);
 }
 
 impl SpoolScale {
+    // Notifications from Console to Scale  ////////////////////////
+
     pub fn calibrate(&self, weight: i32) {
         self.console_to_scale
             .try_send(ConsoleToScale::Calibrate(weight))
@@ -140,6 +145,16 @@ impl SpoolScale {
         }
     }
 
+    pub fn update_firmware(&self, train: AppOtaTrain) -> Result<(), String> {
+        if let Err(err) = self.console_to_scale.try_send(ConsoleToScale::UpdateFirmware { train }) {
+            Err(format!("Failed sending update_firmware to scale {err:?}"))
+        } else {
+            Ok(())
+        }
+    }
+
+    // Technical Stuff  ////////////////////////
+
     pub fn process_message(&mut self, _frame_header: &FrameHeader, payload: &[u8]) {
         let parse_res = serde_json::from_slice::<ScaleToConsole>(payload);
         if let Ok(scale_to_console) = parse_res {
@@ -197,6 +212,10 @@ impl SpoolScale {
                 ScaleToConsole::GcodeAnalysisCompleted { job_number, printer_index } => {
                     self.notify_gcode_analysis_completed(job_number, printer_index);
                 }
+                ScaleToConsole::ScaleVersion { version } => {
+                    self.notify_scale_version(&version);
+                }
+                ScaleToConsole::OtaProgressUpdate(update) => self.notify_ota_progress_update(&update),
             }
         } else {
             warn!(
@@ -215,6 +234,8 @@ impl SpoolScale {
     pub fn subscribe(&mut self, observer: alloc::rc::Weak<RefCell<dyn SpoolScaleObserver>>) {
         self.observers.push(observer);
     }
+
+    // Notifications from Scale to Console  ////////////////////////
 
     pub fn notify_scale_loaded(&self, weight: i32) {
         for weak_observer in self.observers.iter() {
@@ -344,6 +365,18 @@ impl SpoolScale {
         for weak_observer in self.observers.iter() {
             let observer = weak_observer.upgrade().unwrap();
             observer.borrow_mut().on_gcode_analysis_completed(job_number, printer_index);
+        }
+    }
+    pub fn notify_scale_version(&self, scale_version: &str) {
+        for weak_observer in self.observers.iter() {
+            let observer = weak_observer.upgrade().unwrap();
+            observer.borrow_mut().on_scale_version(scale_version);
+        }
+    }
+    pub fn notify_ota_progress_update(&self, update: &OtaProgressUpdate) {
+        for weak_observer in self.observers.iter() {
+            let observer = weak_observer.upgrade().unwrap();
+            observer.borrow_mut().on_ota_progress_update(update.clone());
         }
     }
 }
@@ -716,7 +749,9 @@ pub async fn spool_scale_task(
                     let json_res = serde_json::to_string(&console_to_scale);
                     match json_res {
                         Ok(mut json) => {
-                            if matches!(console_to_scale, ConsoleToScale::RequestGcodeAnalysis { .. }) {
+                            if matches!(console_to_scale, ConsoleToScale::RequestGcodeAnalysis { .. })
+                                || matches!(console_to_scale, ConsoleToScale::UpdateFirmware { .. })
+                            {
                                 json = encrypt(&app_config.borrow().scale_encryption_key.borrow(), &json);
                             }
                             let send_to_scale_header = FrameHeader {

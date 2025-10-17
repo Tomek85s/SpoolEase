@@ -1,10 +1,7 @@
+use shared::settings::OTA_DOMAIN_STABLE;
+
 pub const AP_ADDR: (u8, u8, u8, u8) = (192, 168, 2, 1);
 
-pub const OTA_DOMAIN: &str = "raw.githubusercontent.com";
-// pub const OTA_PATH: &str = "/yanshay/spoolease-bin/refs/heads/main/bins/console/ota/";
-pub const OTA_PATH: &str = "/yanshay/spoolease-debug/refs/heads/main/0.5/console/";
-pub const OTA_TOML_FILENAME: &str = "ota.toml";
-pub const OTA_TLS_CERTIFICATE: &str = concat!(include_str!("./certs/raw.githubusercontent.com.pem"), "\0");
 
 pub const WEB_SERVER_HTTPS: bool = false; // Don't forget to set also port below
 pub const WEB_SERVER_PORT: u16 = 80; // For HTTPS use 443 normally, for HTTP 80, but either can be any other port number
@@ -19,3 +16,12 @@ pub const WEB_APP_SALT: &str = "example_salt"; // to be aligned with WASM & Capt
 pub const WEB_APP_KEY_DERIVATION_ITERATIONS: u32 = 10_000; // to be aligned with WASM & Captive HTML
 
 pub const MAX_NUM_PRINTERS: usize = 5;
+
+// Framework basic OTA (from web-config)
+pub const OTA_DOMAIN: &str = OTA_DOMAIN_STABLE;
+pub const OTA_PATH: &str = CONSOLE_STABLE_OTA_PATH;
+
+pub const OTA_TOML_FILENAME: &str = "ota.toml";
+// pub const OTA_TLS_CERTIFICATE: &str = concat!(include_str!("./certs/raw.githubusercontent.com.pem"), "\0");
+pub const CONSOLE_STABLE_OTA_PATH: &str = "/bins/0.5/console/ota/";
+pub const CONSOLE_UNSTABLE_OTA_PATH: &str = "/bins/0.5/console/ota-unstable/";

@@ -62,7 +62,7 @@ export component SpoolStaging inherits Window {
                 }
             }
 
-            if (AppState.spool-staging-state == SpoolStagingState.Empty && FrameworkState.ota-info.newer): 
+            if (AppState.spool-staging-state == SpoolStagingState.Empty && (AppState.stable-firmware-updates-available() || AppState.unstable-firmware-updates-available())): 
             Rectangle {
                 width: parent.width;
                 height: parent.height;
@@ -72,7 +72,7 @@ export component SpoolStaging inherits Window {
                     horizontal-alignment: center;
                     vertical-alignment: center;
 
-                    text: "New\nVersion\n\{FrameworkState.ota-info.version}";
+                    text: AppState.stable-firmware-updates-available() ? "Updates\nAvailable" : "Beta\nUpdates\nAvailable";
                 }
             }
 

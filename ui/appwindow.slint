@@ -18,6 +18,7 @@ import { NewTagScan } from "new-tag-scan.slint";
 import { StagingOperations } from "staging-operations.slint";
 import { TrayOperations } from "tray-operations.slint";
 import { MessageBox } from "message-box.slint";
+import { AppOtaSelect } from "ota.slint";
 
 // reexport to rust
 
@@ -64,7 +65,7 @@ export component AppWindow inherits Window {
         handle-swipe-left: AppState.select-printer == false;
         handle-swipe-right: AppState.select-printer == true;
         swiped => {
-            if FrameworkState.ota-state == OtaState.NotStarted {
+            if FrameworkState.ota-state != OtaState.Started {
                 if self.handle-swipe-down && self.current-position.y > self.pressed-position.y + (self.height / 8) {
                     // swipe down 
                     current-page -= 1;
@@ -136,7 +137,9 @@ export component AppWindow inherits Window {
                 bottom := ControlPanel {
                     clicked-ota => {
                         root.current-page = 2;
-                        FrameworkState.ota-state = OtaState.UserInput;
+                        FrameworkState.ota-clear-message();
+                        FrameworkState.ota-state = OtaState.Checking;
+                        AppBackend.ota-check-firmwares();
                     }
                     staging-section-width: external.width;
                     button-width: external.width;
@@ -148,6 +151,11 @@ export component AppWindow inherits Window {
                 height: root.height;
                 done => { // not used, but if we want to in the future
                     root.current-page = 1;
+                }
+                // TODO: Can move Checking also to Framework Ota 
+                if FrameworkState.ota-state == OtaState.UserInput: AppOtaSelect {
+                    width: root.width;
+                    height: root.height;
                 }
             }
         }

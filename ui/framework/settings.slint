@@ -58,9 +58,11 @@ export component ResetFixedKeyButton inherits SettingsButton {
 }
 
 export component OtaButton inherits SettingsButton {
-    text: "Update Firmware Over Network" + (FrameworkState.ota-info.newer ? " to \{FrameworkState.ota-info.version}" : "");
+    text: "Check & Update Firmware Over Network";// + (FrameworkState.ota-info.newer ? " to \{FrameworkState.ota-info.version}" : "");
     clicked => {
-        FrameworkState.ota-state = OtaState.UserInput;
+        FrameworkState.ota-state = OtaState.Checking;
+        FrameworkState.ota-clear-message();
+        AppBackend.ota-check-firmwares();
     }
 }
 
@@ -122,6 +124,7 @@ export component SettingsConfirm inherits VerticalLayout {
 ////////////////////////////////////
 
 export component FrameworkSettingsButtons inherits VerticalLayout {
+    callback ota-clicked;
     VerticalLayout {
         WebConfigButton { }
 
@@ -177,25 +180,25 @@ export component FrameworkSettingsDetails inherits Rectangle {
             FrameworkState.restart-device-state = RestartDeviceState.NotStarted;
         }
     }
-// OTA
-    if FrameworkState.ota-state == OtaState.UserInput: 
-        SettingsConfirm {
-        title: "Over the Air Network Update";
-        text: "Check for firmware updates and install if available?\n\nIMPORTANT: This is an Alpha version—make sure you know what you’re updating to.\n\nThe process may take a few minutes.";
-        clicked-positive => {
-            FrameworkBackend.update-firmware-ota();
-        }
-        clicked-negative => {
-            FrameworkState.ota-state = OtaState.NotStarted;
-        }
-    }
+// Basic OTA, more complex is for this specific app
+    // if FrameworkState.ota-state == OtaState.UserInput: 
+    //     SettingsConfirm {
+    //     title: "Over the Air Network Update";
+    //     text: "Check for firmware updates and install if available?\n\nIMPORTANT: This is an Alpha version—make sure you know what you’re updating to.\n\nThe process may take a few minutes.";
+    //     clicked-positive => {
+    //         FrameworkBackend.update-firmware-ota();
+    //     }
+    //     clicked-negative => {
+    //         FrameworkState.ota-state = OtaState.NotStarted;
+    //     }
+    // }
 
     if FrameworkState.ota-state != OtaState.NotStarted && FrameworkState.ota-state != OtaState.UserInput: ota-run := VerticalLayout {
         alignment: stretch;
         Rectangle {
             vertical-stretch: 1;
             width: parent.width;
-            background: FrameworkState.ota-state == OtaState.Failed ? red : FrameworkState.ota-state == OtaState.Completed ? green : white;
+            background: FrameworkState.ota-state == OtaState.Failed ? red : FrameworkState.ota-state == OtaState.Completed ? lightgreen : white;
             border-color: black;
             border-width: 1px;
             Text {
@@ -207,8 +210,8 @@ export component FrameworkSettingsDetails inherits Rectangle {
         }
 
         SettingsButton {
-            enabled: FrameworkState.ota-state == OtaState.Failed || FrameworkState.ota-state == OtaState.Completed;
-            text: "Ok";
+            enabled: FrameworkState.ota-state == OtaState.Failed || FrameworkState.ota-state == OtaState.Completed || FrameworkState.ota-allow-close-during-update;
+            text: "Ok" +  (FrameworkState.ota-allow-close-during-update ? " (Update Will Continue)" : "");
             clicked => {
                 FrameworkState.ota-state = OtaState.NotStarted;
             }
@@ -270,6 +273,7 @@ export component FrameworkSettingsDetails inherits Rectangle {
 }
 
 export component Settings inherits Rectangle {
+    callback ota-clicked();
     in-out property <string> selected-tab: tabs.selected-index;
     in-out property <length> x-offset: tabs.width;
     in-out property <length> y-offset: title.height;

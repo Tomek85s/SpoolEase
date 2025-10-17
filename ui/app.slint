@@ -1,4 +1,4 @@
-import { FrameworkState } from "framework/framework.slint";
+import { FrameworkState, OtaState } from "framework/framework.slint";
 import { SelectorOption } from "framework/widgets.slint";
 import { SelectorOptionsList } from "framework/widgets.slint";
 // Types
@@ -154,6 +154,8 @@ export global AppBackend {
     callback untag-slot(tray-id: int);
     callback reset-slot(tray-id: int);
     callback configure-slot-with-spool-id(tray-id: int, spool-id: string);
+    callback ota-check-firmwares();
+    callback ota-update-firmware(product: string, train: string);
 }
 
 export enum NewTagScanPage {
@@ -179,8 +181,33 @@ export enum StagingOperationsPage {
   UpdateWeight,
 }
 
+export struct Firmwares {
+  console-curr: string,
+  console-stable: string,
+  console-stable-newer: bool,
+  console-unstable: string,
+  console-unstable-newer: bool,
+  scale-curr: string,
+  scale-stable: string,
+  scale-stable-newer: bool,
+  scale-unstable: string,
+  scale-unstable-newer: bool,
+}
 
 export global AppState {
+    in-out property <Firmwares> firmwares: {
+        console-curr: "console-curr",
+        console-stable: "console-stable",
+        console-stable-newer: false,
+        console-unstable: "console-unstable",
+        console-unstable-newer: true,
+        scale-curr: "scale-curr",
+        scale-stable: "scale-stable",
+        scale-stable-newer: true,
+        scale-unstable: "scale-unstable",
+        scale-unstable-newer: true,
+    };
+
     in-out property <string> message-box-title;
     in-out property <string> message-box-text;
     in-out property <string> message-box-text2;
@@ -357,7 +384,7 @@ export global AppState {
         self.user-message-type = StatusType.Success;
         start-highlight-tray(999);
         if final-step {
-          self.control-state = ControlState.PostAction;
+            self.control-state = ControlState.PostAction;
         }
     }
 
@@ -625,12 +652,20 @@ export global AppState {
         }
     }
 
-    // public function reset-printer() {
-    //     self.curr-ams-id = 0;
-    //     self.ams-exists = [0];
-    //     self.trays-state = self.empty-trays-state();
-    //     self.control-state = ControlState.ConnectingToPrinter;
-    // }
+    public function notify-available-firmwares(firmwares: Firmwares) {
+        self.firmwares = firmwares;
+        if FrameworkState.ota-state == OtaState.Checking {
+            FrameworkState.ota-state = OtaState.UserInput;
+        }
+    }
+
+    pure public function stable-firmware-updates-available() -> bool {
+      return self.firmwares.console-stable-newer || self.firmwares.scale-stable-newer;
+    }
+
+    pure public function unstable-firmware-updates-available() -> bool {
+      return self.firmwares.console-unstable-newer || self.firmwares.scale-unstable-newer;
+    }
 
     function empty-trays-state() -> [UiTray] {
         return [

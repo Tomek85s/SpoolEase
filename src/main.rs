@@ -24,8 +24,10 @@ mod view_model;
 mod web_app;
 mod spool_record;
 mod types;
+mod app_ota;
 
 use alloc::{boxed::Box, format, rc::Rc, string::ToString};
+use shared::settings::OTA_TLS_CERTIFICATE;
 use core::{cell::RefCell, marker::PhantomData, net::Ipv4Addr};
 use embassy_futures::yield_now;
 use esp_alloc::{self as _, HeapStats};
@@ -67,7 +69,7 @@ use framework::{
 
 use app_config::AppConfig;
 use settings::WEB_SERVER_NUM_LISTENERS;
-use settings::{AP_ADDR, MAX_NUM_PRINTERS, OTA_TLS_CERTIFICATE};
+use settings::{AP_ADDR, MAX_NUM_PRINTERS};
 use settings::{
     OTA_DOMAIN, OTA_PATH, OTA_TOML_FILENAME, WEB_APP_DOMAIN, WEB_APP_KEY_DERIVATION_ITERATIONS, WEB_APP_SALT, WEB_APP_SECURITY_KEY_LENGTH,
     WEB_SERVER_CAPTIVE, WEB_SERVER_HTTPS, WEB_SERVER_PORT, WEB_SERVER_TLS_CERTIFICATE, WEB_SERVER_TLS_PRIVATE_KEY,

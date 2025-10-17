@@ -22,6 +22,8 @@ use shared::gcode_analysis_task::{
     fetch_gcode_analysis_task, Fetch3mf, FilamentUsage, GcodeAnalysisNotification, GcodeAnalysisNotificationChannel, GcodeAnalysisRequest,
     GcodeAnalysisRequestChannel, GcodeAnalyzerObserver,
 };
+use shared::types::AppOtaTrain;
+use shared::utils::channel_send;
 use slint::{ComponentHandle, Model, SharedString, ToSharedString};
 
 use framework::prelude::*;
@@ -32,6 +34,7 @@ use framework::{
 
 use crate::app::{UiSlotDisplay, UiSpoolRecord, UiSpoolRecordDisplay};
 use crate::app_config::{BASE_FILAMENTS, FILAMENT_BRAND_NAMES, MATERIALS};
+use crate::app_ota::{app_ota_task, AppOtaProduct, AppOtaRequest, AppOtaRequestChannel};
 use crate::bambu::bambu_print::PrintProject;
 use crate::bambu::{Filament, KExtruder, KInfo, KNozzleDiameter, KNozzleId, KPrinter, SpoolId, Tray, TrayBits};
 use crate::color_utils::get_color_name;
@@ -82,6 +85,8 @@ pub struct ViewModel {
     app_async_tasks_channel: Rc<AppAsyncTasksChannel>,
     pub recently_added_spool_id: Option<String>,
     store_state_request_channel: Rc<StoreStateRequestChannel>,
+    pub app_ota_request_channel: Rc<AppOtaRequestChannel>,
+    pub scale_version: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -168,6 +173,8 @@ impl ViewModel {
             app_async_tasks_channel,
             recently_added_spool_id: None,
             store_state_request_channel: Rc::new(StoreStateRequestChannel::new()),
+            app_ota_request_channel: Rc::new(AppOtaRequestChannel::new()),
+            scale_version: None,
         };
         let view_model_rc = Rc::new(RefCell::new(view_model));
 
@@ -409,10 +416,11 @@ impl ViewModel {
             framework.borrow().reset_device();
         });
 
-        let framework = self.framework.clone();
-        ui_framework_backend.on_update_firmware_ota(move || {
-            framework.borrow().update_firmware_ota();
-        });
+        // not the OTA used any longer
+        // let framework = self.framework.clone();
+        // ui_framework_backend.on_update_firmware_ota(move || {
+        //     framework.borrow().update_firmware_ota();
+        // });
 
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
         self.ui_weak
@@ -430,6 +438,9 @@ impl ViewModel {
     pub fn init_app_stuff(&mut self) {
         let async_tasks_task = Box::leak(Box::new(TaskStorage::new())).spawn(|| app_async_task(self.view_model.clone().unwrap()));
         self.framework.borrow().spawner.spawn(async_tasks_task).ok();
+
+        let app_ota_task = Box::leak(Box::new(TaskStorage::new())).spawn(|| app_ota_task(self.framework.clone(), self.view_model.clone().unwrap()));
+        self.framework.borrow().spawner.spawn(app_ota_task).ok();
 
         // Subscribe to rust spool_tag events
         let trait_for_spool_tag_rc: Rc<RefCell<dyn spool_tag::SpoolTagObserver>> = self.view_model.as_ref().unwrap().clone();
@@ -587,6 +598,18 @@ impl ViewModel {
             .unwrap()
             .global::<crate::app::AppBackend>()
             .on_configure_slot_with_spool_id(move |tray_id, spool_id| moved_view_model.borrow().ui_configure_slot_with_spool_id(tray_id, &spool_id));
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
+            .on_ota_check_firmwares(move || moved_view_model.borrow().ui_ota_check_firmwares());
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
+            .on_ota_update_firmware(move |product, train| moved_view_model.borrow().ui_ota_update_firmware(&product, &train));
     }
 
     fn perform_select_printer(
@@ -819,6 +842,39 @@ impl ViewModel {
             .on_set_staging_to_tray(move |tray_id: i32| {
                 Self::set_staging_to_tray(&moved_view_model, &moved_filament_staging, &moved_bambu_printer, &moved_ui, tray_id);
             });
+    }
+
+    fn ui_ota_update_firmware(&self, product: &str, train: &str) {
+        let train = match train {
+            "stable" => AppOtaTrain::Stable,
+            "unstable" => AppOtaTrain::Unstable,
+            _ => {
+                error!("Internal Error: unsupported train {train} in request to update");
+                return;
+            }
+        };
+        match product {
+            "console" => {
+                channel_send(
+                    &self.app_ota_request_channel,
+                    AppOtaRequest::Update {
+                        product: AppOtaProduct::Console,
+                        train,
+                    },
+                );
+            }
+            "scale" => {
+                info!("Sending request to update firmware to Scale");
+                let _ = self.spool_scale_model.borrow().update_firmware(train);
+            }
+            _ => {
+                error!("Internal error, unsupported product to update");
+            }
+        }
+    }
+
+    fn ui_ota_check_firmwares(&self) {
+        channel_send(&self.app_ota_request_channel, AppOtaRequest::CheckOta {});
     }
 
     fn ui_configure_slot_with_spool_id(&self, slot_id: i32, spool_id: &str) {
@@ -1852,7 +1908,17 @@ impl ViewModel {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn add_calibration_to_printer(&self, printer_serial: &str, extruder_id: i32, nozzle_diameter: &str,nozzle_id: &str, filament_id: &str, setting_id: &str, k_value: &str, name: &str) -> Result<(), String> {
+    pub fn add_calibration_to_printer(
+        &self,
+        printer_serial: &str,
+        extruder_id: i32,
+        nozzle_diameter: &str,
+        nozzle_id: &str,
+        filament_id: &str,
+        setting_id: &str,
+        k_value: &str,
+        name: &str,
+    ) -> Result<(), String> {
         let mut found_printer = false;
         for printer in &self.bambu_printer_model.printers {
             let mut printer_borrow = printer.borrow_mut();
@@ -1867,6 +1933,40 @@ impl ViewModel {
         } else {
             Err("Printer not found".to_string())
         }
+    }
+
+    pub fn update_firmware_versions(&self, fw: &[crate::app_ota::FirmwareInfo]) {
+        let ui = self.ui_weak.unwrap();
+        let ui_app_state: crate::app::AppState<'_> = ui.global::<crate::app::AppState>();
+        let console_stable_info = fw
+            .iter()
+            .find(|fw| fw.product == AppOtaProduct::Console && fw.train == AppOtaTrain::Stable)
+            .unwrap();
+        let console_unstable_info = fw
+            .iter()
+            .find(|fw| fw.product == AppOtaProduct::Console && fw.train == AppOtaTrain::Unstable)
+            .unwrap();
+        let scale_stable_info = fw
+            .iter()
+            .find(|fw| fw.product == AppOtaProduct::Scale && fw.train == AppOtaTrain::Stable)
+            .unwrap();
+        let scale_unstable_info = fw
+            .iter()
+            .find(|fw| fw.product == AppOtaProduct::Scale && fw.train == AppOtaTrain::Unstable)
+            .unwrap();
+        let firmwares = crate::app::Firmwares {
+            console_curr: self.framework.borrow_mut().settings.app_cargo_pkg_version.to_shared_string(),
+            console_stable: console_stable_info.version.to_shared_string(),
+            console_stable_newer: console_stable_info.newer,
+            console_unstable: console_unstable_info.version.to_shared_string(),
+            console_unstable_newer: console_unstable_info.newer,
+            scale_curr: self.scale_version.clone().unwrap_or_default().to_shared_string(),
+            scale_stable: scale_stable_info.version.to_shared_string(),
+            scale_stable_newer: scale_stable_info.newer,
+            scale_unstable: scale_unstable_info.version.to_shared_string(),
+            scale_unstable_newer: scale_unstable_info.newer,
+        };
+        ui_app_state.invoke_notify_available_firmwares(firmwares);
     }
 }
 
@@ -2190,39 +2290,40 @@ impl FrameworkObserver for ViewModel {
         self.ui_weak.unwrap().global::<crate::app::FrameworkState>().invoke_web_config_stopped();
     }
     fn on_wifi_sta_connected(&self) {
-        self.framework.borrow().check_firmware_ota();
+        // self.framework.borrow().check_firmware_ota();
+        self.ui_ota_check_firmwares();
     }
 
     fn on_wifi_sta_disconnected(&self) {
         info!("WiFi disconnected");
     }
 
-    fn on_ota_start(&self) {
+    fn on_ota_start(&mut self) {
         self.ui_weak.unwrap().global::<crate::app::FrameworkState>().invoke_ota_started();
     }
 
-    fn on_ota_status(&self, text: &str) {
+    fn on_ota_status(&mut self, text: &str) {
         self.ui_weak
             .unwrap()
             .global::<crate::app::FrameworkState>()
             .invoke_ota_status(SharedString::from(text));
     }
 
-    fn on_ota_completed(&self, text: &str) {
+    fn on_ota_completed(&mut self, text: &str) {
         self.ui_weak
             .unwrap()
             .global::<crate::app::FrameworkState>()
             .invoke_ota_completed(SharedString::from(text));
     }
 
-    fn on_ota_failed(&self, text: &str) {
+    fn on_ota_failed(&mut self, text: &str) {
         self.ui_weak
             .unwrap()
             .global::<crate::app::FrameworkState>()
             .invoke_ota_failed(SharedString::from(text));
     }
 
-    fn on_ota_version_available(&self, version: &str, newer: bool) {
+    fn on_ota_version_available(&mut self, version: &str, newer: bool) {
         if newer {
             info!("OTA: New version {version}");
         } else {
@@ -2426,6 +2527,20 @@ impl SpoolScaleObserver for ViewModel {
         debug!("Received gcode analysis job {job_number} from Scale");
         shared::gcode_analysis_task::GcodeAnalyzerObserver::on_completed(self, job_number, printer_index);
     }
+
+    fn on_scale_version(&mut self, scale_version: &str) {
+        self.scale_version = Some(scale_version.to_string());
+    }
+
+    fn on_ota_progress_update(&mut self, update: shared::scale::OtaProgressUpdate) {
+        match update {
+            shared::scale::OtaProgressUpdate::Start => self.on_ota_start(),
+            shared::scale::OtaProgressUpdate::Status { text } => self.on_ota_status(&text),
+            shared::scale::OtaProgressUpdate::Failed { text } => self.on_ota_failed(&text),
+            shared::scale::OtaProgressUpdate::Completed { text } => self.on_ota_completed(&text),
+            shared::scale::OtaProgressUpdate::VersionAvailable { version, newer } => self.on_ota_version_available(&version, newer),
+        }
+    }
 }
 
 impl StoreObserver for ViewModel {}
@@ -2492,7 +2607,9 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
     for printer_index in 0..num_of_printers {
         let printer = view_model.borrow().bambu_printer_model.printers[printer_index].clone();
         if let Err(err) = BambuPrinter::load_printer_state(&framework, &printer, &store).await {
-                view_model.borrow().message_box("Restore Print State Notice", &err, "", crate::app::StatusType::Error, 0);
+            view_model
+                .borrow()
+                .message_box("Restore Print State Notice", &err, "", crate::app::StatusType::Error, 0);
         }
         info!("[{}] Checking for print project resume state", printer.borrow().printer_number);
         match BambuPrinter::load_print_project_state(&framework, &printer).await {
@@ -2505,7 +2622,13 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
             Err(err) => {
                 error!("{err} - Print tracking can't be resumed");
                 let _ = BambuPrinter::delete_print_project_state(&framework, &printer).await;
-                view_model.borrow().message_box("Restore Running Print State Notice", &err, "Print Tracking Can't be Resumed", crate::app::StatusType::Error, 0);
+                view_model.borrow().message_box(
+                    "Restore Running Print State Notice",
+                    &err,
+                    "Print Tracking Can't be Resumed",
+                    crate::app::StatusType::Error,
+                    0,
+                );
             }
         }
         view_model.borrow().update_ui_from_printer(&printer.borrow());
@@ -2522,14 +2645,29 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
                 StoreStateRequest::StorePrintProject { printer_index } => {
                     let printer = view_model.borrow().bambu_printer_model.printers[printer_index].clone();
                     if let Err(err) = BambuPrinter::store_print_project_state(&framework, &printer).await {
-                        view_model.borrow().message_box("Print Tracking Notice", &err, "SpoolEase Will Not be Able to Resume Tracking if Restarted", crate::app::StatusType::Error, 0);
+                        view_model.borrow().message_box(
+                            "Print Tracking Notice",
+                            &err,
+                            "SpoolEase Will Not be Able to Resume Tracking if Restarted",
+                            crate::app::StatusType::Error,
+                            0,
+                        );
                         let _ = BambuPrinter::delete_print_project_state(&framework, &printer).await;
                     }
                 }
-                StoreStateRequest::StoreConsumeIndex { printer_index,  consume_store_counter } => {
+                StoreStateRequest::StoreConsumeIndex {
+                    printer_index,
+                    consume_store_counter,
+                } => {
                     let printer = view_model.borrow().bambu_printer_model.printers[printer_index].clone();
                     if let Err(err) = BambuPrinter::store_consume_index_state(&framework, &printer, consume_store_counter).await {
-                        view_model.borrow().message_box("Print Tracking Notice", &err, "If This Error Repeats, SpoolEase Will Not be Able to Resume Tracking if Restarted", crate::app::StatusType::Error, 0);
+                        view_model.borrow().message_box(
+                            "Print Tracking Notice",
+                            &err,
+                            "If This Error Repeats, SpoolEase Will Not be Able to Resume Tracking if Restarted",
+                            crate::app::StatusType::Error,
+                            0,
+                        );
                     }
                 }
                 StoreStateRequest::DeletePrintProject { printer_index } => {
