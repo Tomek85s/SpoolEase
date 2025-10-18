@@ -180,7 +180,6 @@ pub async fn app_ota_task(framework: Rc<RefCell<Framework>>, view_model: Rc<RefC
                     core::mem::swap(&mut app_ota_observer.version, &mut ota_item.version);
                     core::mem::swap(&mut app_ota_observer.newer, &mut ota_item.newer);
                 }
-                debug!(">>>> {ota_info:?}");
                 view_model.borrow().update_firmware_versions(&ota_info);
             }
             AppOtaRequest::Update { product, train } => {

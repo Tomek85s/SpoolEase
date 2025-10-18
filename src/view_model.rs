@@ -1993,7 +1993,6 @@ impl ViewModel {
             scale_debug: scale_debug_info.version.to_shared_string(),
             scale_debug_newer: scale_debug_info.newer,
         };
-        debug!(">>>> {firmwares:?}");
         ui_app_state.invoke_notify_available_firmwares(firmwares);
     }
 }
