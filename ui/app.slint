@@ -187,11 +187,15 @@ export struct Firmwares {
   console-stable-newer: bool,
   console-unstable: string,
   console-unstable-newer: bool,
+  console-debug: string,
+  console-debug-newer: bool,
   scale-curr: string,
   scale-stable: string,
   scale-stable-newer: bool,
   scale-unstable: string,
   scale-unstable-newer: bool,
+  scale-debug: string,
+  scale-debug-newer: bool,
 }
 
 export global AppState {
@@ -200,12 +204,16 @@ export global AppState {
         console-stable: "console-stable",
         console-stable-newer: false,
         console-unstable: "console-unstable",
-        console-unstable-newer: true,
+        console-unstable-newer: false,
+        console-debug: "console-debug",
+        console-debug-newer: false,
         scale-curr: "scale-curr",
         scale-stable: "scale-stable",
-        scale-stable-newer: true,
+        scale-stable-newer: false,
         scale-unstable: "scale-unstable",
-        scale-unstable-newer: true,
+        scale-unstable-newer: false,
+        scale-debug: "scale-debug",
+        scale-debug-newer: false,
     };
 
     in-out property <string> message-box-title;

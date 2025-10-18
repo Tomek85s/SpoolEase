@@ -4,14 +4,14 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use framework::framework::FrameworkObserver;
 use framework::ota::{run_ota, OtaObserver, OtaRequest};
-use framework::{error, info};
-use shared::settings::{OTA_DOMAIN_STABLE, OTA_DOMAIN_UNSTABLE, OTA_TLS_CERTIFICATE, SCALE_STABLE_OTA_PATH, SCALE_UNSTABLE_OTA_PATH};
+use framework::{debug, error, info};
+use shared::settings::{OTA_DOMAIN_DEBUG, OTA_DOMAIN_STABLE, OTA_DOMAIN_UNSTABLE, OTA_TLS_CERTIFICATE, SCALE_DEBUG_OTA_PATH, SCALE_STABLE_OTA_PATH, SCALE_UNSTABLE_OTA_PATH};
 use shared::types::AppOtaTrain;
 
 use alloc::rc::Rc;
 use framework::prelude::Framework;
 
-use crate::settings::{CONSOLE_STABLE_OTA_PATH, CONSOLE_UNSTABLE_OTA_PATH};
+use crate::settings::{CONSOLE_DEBUG_OTA_PATH, CONSOLE_STABLE_OTA_PATH, CONSOLE_UNSTABLE_OTA_PATH};
 use crate::view_model::ViewModel;
 
 #[derive(Debug, PartialEq, Default)]
@@ -117,6 +117,13 @@ pub async fn app_ota_task(framework: Rc<RefCell<Framework>>, view_model: Rc<RefC
             ..Default::default()
         },
         FirmwareInfo {
+            product: AppOtaProduct::Console,
+            train: AppOtaTrain::Debug,
+            domain: OTA_DOMAIN_DEBUG,
+            path: CONSOLE_DEBUG_OTA_PATH,
+            ..Default::default()
+        },
+        FirmwareInfo {
             product: AppOtaProduct::Scale,
             train: AppOtaTrain::Stable,
             domain: OTA_DOMAIN_STABLE,
@@ -128,6 +135,13 @@ pub async fn app_ota_task(framework: Rc<RefCell<Framework>>, view_model: Rc<RefC
             train: AppOtaTrain::Unstable,
             domain: OTA_DOMAIN_UNSTABLE,
             path: SCALE_UNSTABLE_OTA_PATH,
+            ..Default::default()
+        },
+        FirmwareInfo {
+            product: AppOtaProduct::Scale,
+            train: AppOtaTrain::Debug,
+            domain: OTA_DOMAIN_DEBUG,
+            path: SCALE_DEBUG_OTA_PATH,
             ..Default::default()
         },
     ];
@@ -166,6 +180,7 @@ pub async fn app_ota_task(framework: Rc<RefCell<Framework>>, view_model: Rc<RefC
                     core::mem::swap(&mut app_ota_observer.version, &mut ota_item.version);
                     core::mem::swap(&mut app_ota_observer.newer, &mut ota_item.newer);
                 }
+                debug!(">>>> {ota_info:?}");
                 view_model.borrow().update_firmware_versions(&ota_info);
             }
             AppOtaRequest::Update { product, train } => {
@@ -182,6 +197,7 @@ pub async fn app_ota_task(framework: Rc<RefCell<Framework>>, view_model: Rc<RefC
                     let index = match train {
                         AppOtaTrain::Stable => 0,
                         AppOtaTrain::Unstable => 1,
+                        AppOtaTrain::Debug => 2,
                     };
                     let ota_item = &mut ota_info[index];
                     run_ota(

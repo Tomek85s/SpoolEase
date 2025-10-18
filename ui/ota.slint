@@ -26,13 +26,15 @@ export component OtaDisplay inherits Rectangle {
 
         HorizontalLayout {
             RectText {
-              background: white;
+                background: white;
             }
+
             RectText {
                 background: skyblue;
                 width: 190px;
                 text: "Console";
             }
+
             RectText {
                 background: skyblue;
                 width: 190px;
@@ -48,6 +50,7 @@ export component OtaDisplay inherits Rectangle {
                     RectText {
                         text: "Installed";
                     }
+
                     RectText {
                         width: 190px;
                         text: AppState.firmwares.console-curr;
@@ -73,6 +76,7 @@ export component OtaDisplay inherits Rectangle {
                         width: 100px;
                         text: "Stable";
                     }
+
                     MyButton {
                         width: 190px;
                         height: 56px;
@@ -98,12 +102,24 @@ export component OtaDisplay inherits Rectangle {
                     }
                 }
 
-                HorizontalLayout {
+                beta-row := HorizontalLayout {
+                    in-out property <int> pressed-counter:0;
+                    in-out property <bool> debug: Math.mod(pressed-counter,6) > 3;
+                    in-out property <bool> beta: !debug;
                     RectText {
                         width: 100px;
-                        text: "Beta";
+                        text: beta ? "Beta" : "Debug";
+                        background: beta ? white : orangered;
+                        TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            clicked => {
+                                pressed-counter += 1;
+                            }
+                        }
                     }
-                    MyButton {
+// Beta
+                    if beta: MyButton {
                         width: 190px;
                         height: 56px;
                         text: (AppState.firmwares.console-unstable-newer ? "Update to\n" : "") + AppState.firmwares.console-unstable;
@@ -115,7 +131,7 @@ export component OtaDisplay inherits Rectangle {
                         }
                     }
 
-                    MyButton {
+                    if beta: MyButton {
                         width: 190px;
                         height: 56px;
                         text: (AppState.firmwares.scale-unstable-newer ? "Update to\n" : "") + AppState.firmwares.scale-unstable;
@@ -124,6 +140,30 @@ export component OtaDisplay inherits Rectangle {
                             FrameworkState.ota-state = OtaState.Started;
                             FrameworkState.ota-allow-close-during-update = true;
                             AppBackend.ota_update_firmware("scale", "unstable");
+                        }
+                    }
+// Debug
+                    if debug: MyButton {
+                        width: 190px;
+                        height: 56px;
+                        text: (AppState.firmwares.console-debug-newer ? "Update to\n" : "") + AppState.firmwares.console-debug;
+                        enabled: AppState.firmwares.console-debug-newer;
+                        clicked => {
+                            FrameworkState.ota-state = OtaState.Started;
+                            FrameworkState.ota-allow-close-during-update = false;
+                            AppBackend.ota_update_firmware("console", "debug");
+                        }
+                    }
+
+                    if debug: MyButton {
+                        width: 190px;
+                        height: 56px;
+                        text: (AppState.firmwares.scale-debug-newer ? "Update to\n" : "") + AppState.firmwares.scale-debug;
+                        enabled: AppState.firmwares.scale-debug-newer;
+                        clicked => {
+                            FrameworkState.ota-state = OtaState.Started;
+                            FrameworkState.ota-allow-close-during-update = true;
+                            AppBackend.ota_update_firmware("scale", "debug");
                         }
                     }
                 }
@@ -152,6 +192,4 @@ export component AppOtaSelect inherits Rectangle {
     }
 
     property <OtaState> ota_state;
-
-
 }

@@ -22,7 +22,7 @@ use shared::gcode_analysis_task::{
     fetch_gcode_analysis_task, Fetch3mf, FilamentUsage, GcodeAnalysisNotification, GcodeAnalysisNotificationChannel, GcodeAnalysisRequest,
     GcodeAnalysisRequestChannel, GcodeAnalyzerObserver,
 };
-use shared::settings::{OTA_DOMAIN_STABLE, OTA_TLS_CERTIFICATE, SCALE_STABLE_OTA_PATH, SCALE_UNSTABLE_OTA_PATH};
+use shared::settings::{OTA_DOMAIN_DEBUG, OTA_DOMAIN_STABLE, OTA_TLS_CERTIFICATE, SCALE_DEBUG_OTA_PATH, SCALE_STABLE_OTA_PATH, SCALE_UNSTABLE_OTA_PATH};
 use shared::types::AppOtaTrain;
 use shared::utils::channel_send;
 use slint::{ComponentHandle, Model, SharedString, ToSharedString};
@@ -850,6 +850,7 @@ impl ViewModel {
         let train = match train {
             "stable" => AppOtaTrain::Stable,
             "unstable" => AppOtaTrain::Unstable,
+            "debug" => AppOtaTrain::Debug,
             _ => {
                 error!("Internal Error: unsupported train {train} in request to update");
                 return;
@@ -871,6 +872,7 @@ impl ViewModel {
                 let (ota_domain, ota_path) = match train {
                     AppOtaTrain::Stable => (OTA_DOMAIN_STABLE, SCALE_STABLE_OTA_PATH),
                     AppOtaTrain::Unstable => (OTA_DOMAIN_STABLE, SCALE_UNSTABLE_OTA_PATH),
+                    AppOtaTrain::Debug => (OTA_DOMAIN_DEBUG, SCALE_DEBUG_OTA_PATH),
                 };
 
                 let _ = self.spool_scale_model.borrow().update_firmware(
@@ -1959,6 +1961,10 @@ impl ViewModel {
             .iter()
             .find(|fw| fw.product == AppOtaProduct::Console && fw.train == AppOtaTrain::Unstable)
             .unwrap();
+        let console_debug_info = fw
+            .iter()
+            .find(|fw| fw.product == AppOtaProduct::Console && fw.train == AppOtaTrain::Debug)
+            .unwrap();
         let scale_stable_info = fw
             .iter()
             .find(|fw| fw.product == AppOtaProduct::Scale && fw.train == AppOtaTrain::Stable)
@@ -1967,18 +1973,27 @@ impl ViewModel {
             .iter()
             .find(|fw| fw.product == AppOtaProduct::Scale && fw.train == AppOtaTrain::Unstable)
             .unwrap();
+        let scale_debug_info = fw
+            .iter()
+            .find(|fw| fw.product == AppOtaProduct::Scale && fw.train == AppOtaTrain::Debug)
+            .unwrap();
         let firmwares = crate::app::Firmwares {
             console_curr: self.framework.borrow_mut().settings.app_cargo_pkg_version.to_shared_string(),
             console_stable: console_stable_info.version.to_shared_string(),
             console_stable_newer: console_stable_info.newer,
             console_unstable: console_unstable_info.version.to_shared_string(),
             console_unstable_newer: console_unstable_info.newer,
+            console_debug: console_debug_info.version.to_shared_string(),
+            console_debug_newer: console_debug_info.newer,
             scale_curr: self.scale_version.clone().unwrap_or_default().to_shared_string(),
             scale_stable: scale_stable_info.version.to_shared_string(),
             scale_stable_newer: scale_stable_info.newer,
             scale_unstable: scale_unstable_info.version.to_shared_string(),
             scale_unstable_newer: scale_unstable_info.newer,
+            scale_debug: scale_debug_info.version.to_shared_string(),
+            scale_debug_newer: scale_debug_info.newer,
         };
+        debug!(">>>> {firmwares:?}");
         ui_app_state.invoke_notify_available_firmwares(firmwares);
     }
 }
