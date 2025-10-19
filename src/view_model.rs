@@ -277,11 +277,18 @@ impl ViewModel {
                 ))
                 .ok();
 
+
+            let task = Box::leak(Box::new(TaskStorage::new())).spawn(|| store_printers_consume(self.view_model.clone().unwrap()));
             self.framework
                 .borrow()
                 .spawner
-                .spawn(store_printers_consume(self.view_model.clone().unwrap()))
+                .spawn(task)
                 .ok();
+            // self.framework
+            //     .borrow()
+            //     .spawner
+            //     .spawn(store_printers_consume(self.view_model.clone().unwrap()))
+            //     .ok();
         }
         let moved_view_model = self.view_model.clone().unwrap();
         ui_app_backend.on_link_tag_to_spool_id(move |tag_id, spool_id, final_step| {
@@ -2737,7 +2744,7 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
     }
 }
 
-#[embassy_executor::task]
+// #[embassy_executor::task]
 pub async fn store_printers_consume(view_model: Rc<RefCell<ViewModel>>) {
     info!("store_printers_consume task started");
     let store = view_model.borrow().store.clone();
