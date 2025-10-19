@@ -28,13 +28,7 @@ use derivative::Derivative;
 use embassy_executor::raw::TaskStorage;
 use embassy_futures::select::{select, Either};
 use embassy_net::Ipv4Address;
-use embassy_sync::{
-    blocking_mutex::
-        raw::NoopRawMutex
-    ,
-    channel::Channel,
-    pubsub::PubSubChannel,
-};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel, pubsub::PubSubChannel};
 use embassy_time::{with_timeout, Duration, Timer};
 use hashbrown::HashMap;
 use mqttrust::QoS;
@@ -217,8 +211,8 @@ impl BambuPrinter {
             self.virt_tray()
         } else {
             if (128..=135).contains(&index) {
-            index = index - 128 + 16;
-            }    
+                index = index - 128 + 16;
+            }
             &self.ams_trays()[index]
         }
     }
@@ -350,12 +344,16 @@ impl BambuPrinter {
                     Err(err) => {
                         let err_str = format!("[{printer_number}] Failed to Parse Printer State File (Check Terminal for More Info)");
                         term_error!("[{}] Failed to parse printer state in file {} : {}", printer_number, path, err);
-                         Err(err_str)
-
+                        Err(err_str)
                     }
                 },
                 Err(err) => {
-                    term_error!("[{}] Can't read printer state file (ok, if first printer run) {} : {}", printer_number, path, err);
+                    term_error!(
+                        "[{}] Can't read printer state file (ok, if first printer run) {} : {}",
+                        printer_number,
+                        path,
+                        err
+                    );
                     Ok(())
                 }
             }
@@ -1754,10 +1752,17 @@ impl BambuPrinter {
         }
     }
 
-    pub fn add_calibration_to_printer(&mut self, extruder_id: i32, nozzle_diameter: &str,nozzle_id: &str, filament_id: &str, setting_id: &str, k_value: &str, name: &str) {
-        let cmd = crate::bambu_api::ExtrusionCaliSetCommand::new(
-            extruder_id, nozzle_diameter, nozzle_id, filament_id, setting_id, k_value, name
-        );
+    pub fn add_calibration_to_printer(
+        &mut self,
+        extruder_id: i32,
+        nozzle_diameter: &str,
+        nozzle_id: &str,
+        filament_id: &str,
+        setting_id: &str,
+        k_value: &str,
+        name: &str,
+    ) {
+        let cmd = crate::bambu_api::ExtrusionCaliSetCommand::new(extruder_id, nozzle_diameter, nozzle_id, filament_id, setting_id, k_value, name);
         let payload = serde_json::to_string_pretty(&cmd).unwrap();
         self.publish_payload(payload);
     }
@@ -2375,8 +2380,8 @@ pub fn init(
         store_state_request_channel,
     );
 
-    spawner
-        .spawn(restartable_mqtt_task(
+    let task = Box::leak(Box::new(TaskStorage::new())).spawn(|| {
+        restartable_mqtt_task(
             framework,
             8192,
             4096,
@@ -2385,8 +2390,21 @@ pub fn init(
             bambu_printer.clone(),
             restart_printer,
             ssdp_pub_sub,
-        ))
-        .ok();
+        )
+    });
+    spawner.spawn(task).ok();
+    // spawner
+    //     .spawn(restartable_mqtt_task(
+    //         framework,
+    //         8192,
+    //         4096,
+    //         read_packets.clone(),
+    //         write_packets,
+    //         bambu_printer.clone(),
+    //         restart_printer,
+    //         ssdp_pub_sub,
+    //     ))
+    //     .ok();
 
     spawner.spawn(incoming_messages_task(read_packets, bambu_printer.clone())).ok();
 
@@ -2558,7 +2576,7 @@ pub async fn incoming_messages_task(read_packets: Rc<ReadPacketsPubSub>, bambu_p
 }
 
 #[allow(clippy::too_many_arguments)]
-#[embassy_executor::task(pool_size = MAX_NUM_PRINTERS)]
+// #[embassy_executor::task(pool_size = 5)]
 pub async fn restartable_mqtt_task(
     framework: Rc<RefCell<Framework>>,
     rx_socket_buffer_size: usize,
