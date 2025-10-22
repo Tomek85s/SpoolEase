@@ -1909,7 +1909,7 @@ impl ViewModel {
                 if let Some(spool_id) = &printer_borrow.get_any_tray(tray_id).meta_info.spool_id {
                     let (ams_id, tray_id_in_ams) = BambuPrinter::get_ams_and_tray_id(tray_id);
                     let tray_name = match ams_id {
-                        0..3 => {
+                        0..=3 => {
                             format!("{}{}", (b'A' + ams_id as u8) as char, tray_id_in_ams + 1)
                         }
                         128..135 => {
