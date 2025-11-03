@@ -17,7 +17,7 @@ use crate::{
     bambu_api::{self, AmsMapping2Entry, GcodeState}, view_model::StoreStateRequest,
 };
 
-const EXTRA_DEBUG: bool = false;
+const EXTRA_DEBUG: bool = true;
 
 macro_rules! debugex {
     ($($t:tt)*) => {
@@ -234,18 +234,15 @@ impl BambuPrinter {
         let mut gcode_state_change = false;
         let mut new_gcode_state = self.gcode_state;
         // Order when printing is: tray_pre, then tray_tar, then tray_now
-        debugex!(">>>>> In print_project_logic");
-        // let mut curr_gcode_state = GcodeState::Unknown;
         let printer_log_id = self.printer_number;
 
         let mut curr_print_project = self.curr_print_project.take();
 
         if let Some(curr_print_project) = &mut curr_print_project {
-            // debugex!(">>>>> curr_print_project available");
+            debugex!(">>>>> In print_project_logic - curr_print_project available");
             let mut tray_tar_change_from_tray_now = false; // plan to switch filament
-            let mut new_tray_now = 255;
-            let mut tray_now_change = false; // new filament is loaded
-                                             // let mut tray_pre_change_to_tray_now = false; // meaning, starting to pull out filament
+            let mut tray_active_change = false; // new filament is loaded
+            // let mut tray_pre_change_to_tray_now = false; // meaning, starting to pull out filament
 
             let mut layer_num_change = false;
             let mut new_layer_num = self.layer_num;
@@ -279,18 +276,36 @@ impl BambuPrinter {
                 }
             }
 
-            if let Some(ams) = &print.ams {
+            let curr_tray_active = self.get_tray_active();
+            let new_tray_active = Self::get_print_data_tray_active(print, curr_tray_active);
+            if new_tray_active != curr_tray_active {
+                tray_active_change = true;
+            }
+
+            if let Some(_extruder) = print.device.as_ref().and_then(|d| d.extruder.as_ref()) {
+                // in case of multiextruder consuming on change of tray_tar is too sensitive to exact timing and potential to change in the future
+                // So not doing it for now
+                // if update_tray_tar != self.tray_tar && update_tray_tar != self.tray_now {
+                //     // if any extrudeer tray_tar changed, it means tray_tar for our purpose of consume changed
+                //     tray_tar_change_from_tray_now = true;
+                // }
+
+            } else if let Some(ams) = &print.ams {
                 if let Some(update_tray_tar) = ams.tray_tar {
-                    if update_tray_tar != self.tray_tar && update_tray_tar != self.tray_now {
+                    if update_tray_tar != self.tray_tar[0] && update_tray_tar != self.tray_now[0] {
                         tray_tar_change_from_tray_now = true;
                     }
                 }
-                if let Some(update_tray_now) = ams.tray_now {
-                    if update_tray_now != self.tray_now {
-                        tray_now_change = true;
-                    }
-                    new_tray_now = update_tray_now;
-                }
+
+                // This was generalized into tray_active
+                // if let Some(update_tray_now) = ams.tray_now {
+                //     if update_tray_now != self.tray_now[0] {
+                //         tray_now_change = true;
+                //     }
+                //     new_tray_now = update_tray_now;
+                // }
+
+                // This is old - not required, leaving for now
                 // if let Some(update_tray_pre) = ams.tray_pre {
                 //     if update_tray_pre != self.tray_pre && update_tray_pre == self.tray_now {
                 //         tray_pre_change_to_tray_now = true;
@@ -312,8 +327,8 @@ impl BambuPrinter {
                 changed |= self.try_consume(curr_print_project, ConsumeType::FilamentSwitch);
             }
 
-            if tray_now_change {
-                debugex!(">>>>> tray_now_change (from {} to {})", self.tray_now, new_tray_now);
+            if tray_active_change {
+                debugex!(">>>>> tray_active change (from {:?} to {})", curr_tray_active, new_tray_active);
                 changed |= self.try_consume(curr_print_project, ConsumeType::FilamentSwitch);
             }
 
@@ -354,7 +369,7 @@ impl BambuPrinter {
                 curr_print_project.need_consume = true;
             }
 
-            if tray_now_change && new_tray_now != 255 {
+            if tray_active_change && new_tray_active != 255 {
                 // debugex!(">>>>> tray_now_change, set need_consume true");
                 curr_print_project.need_consume = true;
             }
@@ -396,6 +411,8 @@ impl BambuPrinter {
                     }
                 }
             }
+        } else {
+            debugex!(">>>>> In print_project_logic - curr_print_project NOT available");
         }
 
         self.curr_print_project = curr_print_project;
@@ -468,10 +485,10 @@ impl BambuPrinter {
                     debugex!(">>>>>> Checking curr usage entry {usage_entry:?}");
                     if let Some(usage_entry_tray_id) = print_project.get_ams_id(usage_entry.gcode_filament_id) {
                         debugex!(">>>>> self.layer_num = {}", self.layer_num);
-                        debugex!(">>>>> self.tray_now = {}", self.tray_now);
+                        debugex!(">>>>> self.get_tray_active() = {:?}", self.get_tray_active());
                         debugex!(">>>>> usage_entry_tray_id = {usage_entry_tray_id}");
                         if self.layer_num == usage_entry.layer
-                            && self.tray_now == usage_entry_tray_id
+                            && self.get_tray_active() == usage_entry_tray_id
                             && (0..self.ams_trays().len() as i32).contains(&usage_entry_tray_id)
                         {
                             self.update_any_tray(usage_entry_tray_id as usize, |ams_tray| {

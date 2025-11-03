@@ -1213,7 +1213,7 @@ impl ViewModel {
         if let Some(weight_left) = self.weight_left(tray) {
             slint::format!("{:.1}g", weight_left)
         } else if tray.meta_info.consumed_since_load != 0.0 {
-            slint::format!("-{:.1}g", tray.meta_info.consumed_since_load)
+            slint::format!("-{:.2}g", tray.meta_info.consumed_since_load)
         } else {
             SharedString::new()
         }
@@ -2128,6 +2128,7 @@ impl BambuPrinterObserver for ViewModel {
         let access_code = printer.printer_access_code.clone();
         let printer_number = printer.printer_number;
         let printer_index = printer.printer_index;
+        let printer_selector_name = printer.printer_selector_name.clone();
         self.gcode_last_job_number += 1;
 
         let subtask_name = print_project.subtask_name.clone();
@@ -2178,6 +2179,7 @@ impl BambuPrinterObserver for ViewModel {
             threemf_url,
             gcode_filename_in_3mf,
             ftp_memory_save,
+            printer_selector_name,
         };
 
         self.gcode_jobs.push(GcodeJob {
@@ -2843,6 +2845,7 @@ impl GcodeAnalyzerObserver for ViewModel {
         }
         self.gcode_jobs.retain(|job| job.job_number != job_number);
         self.try_dispatch_next_gcode_job();
+        //TODO: Need to notify so it won't try to process anything? waste of work
     }
 
     fn on_completed(&mut self, job_number: i32, printer_index: usize) {

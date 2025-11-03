@@ -57,7 +57,9 @@ impl FilamentUsage {
                 }
                 Err(err) => {
                     error!("Internal error deserializing FilamentUsageEntry : {err}");
-                    return Err(format!("Internal error deserializing FilamentUsageEntry : {err}"));
+                    return Err(format!(
+                        "Internal error deserializing FilamentUsageEntry : {err}"
+                    ));
                 }
             }
         }
@@ -154,6 +156,7 @@ pub struct GcodeAnalysisRequest {
     pub threemf_url: String,
     pub gcode_filename_in_3mf: String,
     pub ftp_memory_save: bool,
+    pub printer_selector_name: String,
 }
 
 pub trait GcodeAnalyzerObserver {
@@ -284,7 +287,11 @@ async fn fetch_gcode_analysis_task_printer_ftp(
 
     const VSFTPD: bool = false; // for debugging with local vsftpd
 
-    let ftp_endpoint = if !VSFTPD {
+    let debug = gcode_analysis_request.printer_selector_name.to_lowercase() == "simulator";
+
+    let ftp_endpoint = if debug {
+        (Ipv4Address::new(192, 168, 10, 78), 990)
+    } else if !VSFTPD {
         (ip, 990)
     } else {
         (Ipv4Address::new(192, 168, 10, 118), 990)
@@ -311,11 +318,7 @@ async fn fetch_gcode_analysis_task_printer_ftp(
             "vsftpd".to_string(),
             esp_mbedtls::Certificates {
                 ca_chain: X509::pem(
-                    concat!(
-                        include_str!("./certs/vmware-vsftpd.pem"),
-                        "\0"
-                    )
-                    .as_bytes(),
+                    concat!(include_str!("./certs/vmware-vsftpd.pem"), "\0").as_bytes(),
                 )
                 .ok(),
                 ..Default::default()
@@ -405,7 +408,7 @@ async fn fetch_gcode_analysis_task_printer_ftp(
         .start_retrieve(
             &threemf_filename,
             data_socket,
-            gcode_analysis_request.ftp_memory_save
+            gcode_analysis_request.ftp_memory_save,
         )
         .await
     {
@@ -621,7 +624,10 @@ async fn fetch_gcode_analysis_task_cloud_http(
     info!("[{printer_log_id}] Initiating connection for:");
     info!("[{printer_log_id}]   Full URL: {threemf_url}");
     info!("[{printer_log_id}]   Host: {host_name}");
-    info!("[{printer_log_id}]   Path: {}", &url[Position::BeforePath..]);
+    info!(
+        "[{printer_log_id}]   Path: {}",
+        &url[Position::BeforePath..]
+    );
     if let Err(err) = conn
         .initiate_request(
             true,

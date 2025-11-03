@@ -60,12 +60,12 @@ type ReadPacketsPubSub = PubSubChannel<NoopRawMutex, BufferedMqttPacket, 20, 2, 
 pub struct BambuPrinter {
     pub bambu_model: Option<Rc<RefCell<Self>>>,
     pub log_filter: log::LevelFilter,
-    pub printer_number: usize,       // number of printer in user's configuration,
+    pub printer_number: usize,                   // number of printer in user's configuration,
     pub printer_index: usize, // index of printer in the array of printers, if a config is not good and skipped, then index would be different than number
     pub printer_serial: String, // mandatory, so configured is the same as actual
     pub printer_access_code: String, // mandatory, so configured is the same as actual
-    pub configured_printer_name: Option<String>,  // the name from config, could be empty
-    pub inner_printer_name: String,  // Unknown or Configured name or from SSDP if discovered
+    pub configured_printer_name: Option<String>, // the name from config, could be empty
+    pub inner_printer_name: String, // Unknown or Configured name or from SSDP if discovered
     pub printer_selector_name: String, // Will be assigned printer name from config OR printer serial (which is always availble) if config not available
     pub configured_printer_ip: Option<Ipv4Address>,
     pub auto_restore_k: bool,
@@ -100,9 +100,10 @@ pub struct BambuPrinter {
     pending_k_restore_sequence: bool,
     pub curr_print_project: Option<PrintProject>,
     pub loaded_print_project: Option<PrintProject>,
-    tray_tar: i32,
-    tray_now: i32,
-    tray_pre: i32,
+    extruder_state: Option<i32>,
+    tray_tar: [i32; 2],
+    tray_now: [i32; 2],
+    tray_pre: [i32; 2],
     gcode_state: GcodeState,
     layer_num: i32,
     pub locked_mode: Option<bool>, // None, unknown, treat as unlocked, false - dev mode, true - locked
@@ -261,24 +262,26 @@ impl BambuPrinter {
 
     pub fn init_printer_persistent_state(&mut self, mut state: PrinterPersistentState, store: &Rc<Store>) {
         self.inner_ams_trays = core::mem::take(state.ams_trays.to_mut());
-        self.inner_ams_trays.resize(24,Tray::default()); 
+        self.inner_ams_trays.resize(24, Tray::default());
         self.inner_virt_tray = core::mem::take(state.virt_tray.to_mut());
         self.inner_nozzle_diameter = state.nozzle_diameter;
         self.inner_ams_exist_bits = state.ams_exist_bits;
         self.inner_tray_exist_bits = state.tray_exist_bits;
         self.inner_tray_read_done_bits = state.tray_read_done_bits;
         self.calibrations = core::mem::take(state.calibrations.to_mut());
-        if self.configured_printer_ip.is_some() { // meaning won't have name from SSDP
+        if self.configured_printer_ip.is_some() {
+            // meaning won't have name from SSDP
             // in this case the name should be taken from the configuration and not from the state, could be it is newer
-            if self.inner_printer_name==default_printer_name() {
+            if self.inner_printer_name == default_printer_name() {
                 // can't be in case printer ip configured, since web config forces name, but lets be defensive about it and support such case
                 self.inner_printer_name = state.printer_name.clone();
             }
         } else {
             // we will get a name from SSDP, and could be such name is in the state and is better for this printer_name in case it exists, but only if it exists not as unknown in state
-            if state.printer_name != default_printer_name() { // override printer_name (which could be from configured name) only if the value stored is not 
+            if state.printer_name != default_printer_name() {
+                // override printer_name (which could be from configured name) only if the value stored is not
                 self.inner_printer_name = state.printer_name.clone();
-            } 
+            }
         }
 
         // this is for upgrading tray from using the old tag_info to the id.
@@ -574,7 +577,7 @@ impl BambuPrinter {
             configured_printer_ip: *printer_ip,
             configured_printer_name: printer_config_name.clone(),
             inner_printer_name: printer_config_name.clone().unwrap_or(default_printer_name()),
-            printer_selector_name, 
+            printer_selector_name,
             auto_restore_k,
             track_print_consume,
             fetch_3mf,
@@ -607,9 +610,10 @@ impl BambuPrinter {
             pending_k_restore_sequence: true,
             curr_print_project: None,
             loaded_print_project: None,
-            tray_tar: 255,
-            tray_now: 255,
-            tray_pre: 255,
+            extruder_state: None, // h2d field for knowing which extruder is active
+            tray_tar: [255, 255], // format for these fields: 0-16 (regular AMS), 128-135 (AMS-HT), 254 (external), 255 (none)
+            tray_now: [255, 255],
+            tray_pre: [255, 255],
             gcode_state: GcodeState::Unknown,
             layer_num: -1,
             locked_mode: None,
@@ -934,30 +938,62 @@ impl BambuPrinter {
         }
     }
 
-    fn get_tray_detailed_ready_state(&self, tray_id: Option<usize>) -> TrayState {
-        if self.tray_now < 0 {
-            // because converting to usize
-            return TrayState::Ready;
+    fn get_active_extruder_from_extruder_state(extruder_state: &Option<i32>) -> usize {
+        (extruder_state.unwrap_or_default() >> 4 & 0xF) as usize
+    }
+
+    fn get_active_extruder(&self) -> usize {
+        Self::get_active_extruder_from_extruder_state(&self.extruder_state)
+    }
+
+    fn get_tray_active(&self) -> i32 {
+        self.tray_now[self.get_active_extruder()]
+    }
+
+    fn get_print_data_tray_active(print: &bambu_api::PrintData, current_tray_active: i32) -> i32 {
+        // the active tray, usually also printing, convention like tray_xxx fields.
+        // always a single value, also in multi extruder printers
+        if let Some(extruder) = print.device.as_ref().and_then(|d| d.extruder.as_ref()) {
+            let active_extruder = Self::get_active_extruder_from_extruder_state(&extruder.state);
+            Self::normalized_h2d_tray_xxx(extruder.info[active_extruder].snow)
+        } else if let Some(tray_now) = &print.ams.as_ref().and_then(|ams| ams.tray_now) {
+            *tray_now
+        } else {
+            // no change, so return the current
+            current_tray_active
         }
+    }
 
-        // let mut loading = None;
-        // let mut unloading = None;
-        let mut loaded = None;
+    fn tray_xxx_to_tray_id(tray_xxx: i32) -> Option<usize> {
+        // in the future can add support for 255 (left h2d external), for now it is none because tray_xxx 255 is equivalent to None
+        // for this, this function will need to accept also extruder (because 255 or 254 depends on extruder, not just tray_xxx, depending on tray_xxx convention - None vs 255 for None)
+        match tray_xxx {
+            0..16 => Some(tray_xxx as usize),
+            128..135 => Some((tray_xxx - 128 + 16) as usize),
+            254 => Some(254),
+            _ => None
+        }
+    }
 
+    fn get_tray_detailed_ready_state(&self, tray_id: Option<usize>) -> TrayState {
+        // For H2D this is not complete, need to distinguish the external spools and tray_id none will not work
+
+        // tray_id - 0..24
+        // tray_active: tray_xxx format (0..16, 128..135, 254, 255)
         if tray_id.is_some() {
-            if self.tray_now == self.tray_tar && self.tray_now != 255 {
-                loaded = Some(self.tray_now as usize);
-            }
-            if tray_id == loaded {
+            let tray_active = self.get_tray_active();
+            let active_tray_id = Self::tray_xxx_to_tray_id(tray_active);
+            if active_tray_id == tray_id {
                 TrayState::Loaded
             } else {
                 TrayState::Ready
             }
-        } else if self.tray_now == 254 {
+        } else if self.get_tray_active() == 254 {
             TrayState::Loaded
         } else {
             TrayState::Empty
         }
+
         // loading/unloading is more complex, should also use "ams_status" and maybe "ams_rfid" from mqtt
         // See Bambustudio statuspanel.cpp & DeviceManager.cpp
         // ams_status_main and ams_status_sub
@@ -970,39 +1006,6 @@ impl BambuPrinter {
         //    1          2                     2, 3, 4      unloading tray_now
         //    1          1                     5, 6, 7      loading tray_now (same as tar now)
         //    1          1         1    ?ams_status = 768   loaded/printing (maybe earlier using additional field)
-
-        // else
-        // if self.tray_now == self.tray_pre && self.tray_tar != self.tray_now {
-        //     unloading = Some(self.tray_now as usize);
-        // }
-        // else
-        // if self.tray_tar == self.tray_now && self.tray_pre != self.tray_now {
-        //     loading = Some(self.tray_now as usize);
-        // } else
-
-        // if tray_id == loading {
-        //     return TrayState::Loading;
-        // }
-        // if tray_id == unloading {
-        //     return TrayState::Unloading;
-        // }
-
-        // let mut detailed_ready_state = TrayState::Ready;
-        // if let Some(tray_id) = tray_id {
-        //
-        //     if self.tray_tar == tray_id as i32 && self.tray_tar != self.tray_pre {
-        //         detailed_ready_state = TrayState::Loading;
-        //     }
-        //     if self.tray_now == tray_id as i32 && self.tray_now != self.tray_pre {
-        //         detailed_ready_state = TrayState::Loaded;
-        //     }
-        //     // TODO: Reverse engineer unloading
-        //     // maybe now = 255 before tar joins it or something?
-        //     // if self.tray_pre == tray_id as i32 && self.tray_pre == self.tray_tar && self.tray_tar == self.tray_now {
-        //     //     detailed_ready_state = TrayState::Unloading;
-        //     // }
-        // }
-        // detailed_ready_state
     }
 
     pub fn get_ams_and_tray_id(tray_id: usize) -> (usize, usize) {
@@ -1038,6 +1041,16 @@ impl BambuPrinter {
             Some(tray_id as usize)
         } else {
             None
+        }
+    }
+
+    #[allow(non_snake_case)]
+    pub fn process_print_message__vir_slots(&mut self, vir_slot: &[PrintTray]) -> (bool, Option<SpoolId>) {
+        let vt_tray = vir_slot.iter().find(|slot| slot.id == Some(254));
+        if let Some(vt_tray) = vt_tray {
+            self.process_print_message__vt_tray(vt_tray)
+        } else {
+            (false, None)
         }
     }
 
@@ -1205,17 +1218,26 @@ impl BambuPrinter {
             nozzle_diameter_change_made = old_nozzle_diameter != *self.nozzle_diameter();
         }
 
+        // Deal with tray_xxx - need to do before ams because depends on both AMS and Device sections, and used at the end of ams processing
+        let tray_xxx_change_made = self.process_print_message__tray_xxx(print);
+
         // Deal with ams changes
         let mut ams_change_made = false;
-        let mut tray_xxx_change_made = false;
         if let Some(ams) = &print.ams {
-            (ams_change_made, removed_tags, tray_xxx_change_made) = self.process_print_message__ams(ams);
+            (ams_change_made, removed_tags) = self.process_print_message__ams(ams);
         }
 
         // Deal with external tray changes
         let mut vt_tray_change_made = false;
         let removed_tag;
-        if let Some(v_tray) = &print.vt_tray {
+        if let Some(vir_slot) = &print.vir_slot {
+            // this is hd2 version of external slotS
+            (vt_tray_change_made, removed_tag) = self.process_print_message__vir_slots(vir_slot);
+            if let Some(removed_tag) = removed_tag {
+                removed_tags.insert(254, removed_tag);
+            }
+        } else if let Some(v_tray) = &print.vt_tray {
+            // this is older printers external slot
             (vt_tray_change_made, removed_tag) = self.process_print_message__vt_tray(v_tray);
             if let Some(removed_tag) = removed_tag {
                 removed_tags.insert(254, removed_tag);
@@ -1262,12 +1284,79 @@ impl BambuPrinter {
         }
 
         // Report back to caller
-        let change_made = nozzle_diameter_change_made || ams_change_made || vt_tray_change_made || print_project_caused_change;
+        let change_made =
+            nozzle_diameter_change_made || ams_change_made || vt_tray_change_made || print_project_caused_change || tray_xxx_change_made;
         (change_made, removed_tags)
     }
 
+    fn normalized_h2d_tray_xxx(h2d_tray_xxx: i32) -> i32 {
+        // this normalize the h2d snow/star/spre to be compatible with older printers tray_now/tray_tar/tray_pre
+        // this need to be called only on data from message
+        // the self.tray_xxx are already normalized
+
+        // Note: to support also left external (value 255) can to use None for tray_xxx in case of empty, and 255 for the value for left tray
+        //       this affects several areas that use tray_xxx convention of 255 as None
+        //       or maybe because tray_xxx exist for both extruders, 254 can always be external (still nicer None, cleaner)
+
+        let ams_id = h2d_tray_xxx >> 8;
+        let tray_in_ams = h2d_tray_xxx & 0xFF; // maybe will need to change if ams
+        match ams_id {
+            0..3 => ams_id * 4 + (tray_in_ams & 0x03), // 0x03 because no support for more than 4 slots ams
+            128..135 => ams_id,
+            254 | 255 => {
+                if tray_in_ams != 255 {
+                    254
+                } else {
+                    255
+                }
+            } // TODO: test on h2d how do tray_xxx report with external spool
+            _ => 255,
+        }
+    }
+
+    fn update_h2d_tray_xxx(curr_tray_xxx: &mut i32, message_sxxx: &i32, changed: &mut bool) {
+        let new_tray_xxx = Self::normalized_h2d_tray_xxx(*message_sxxx);
+        if new_tray_xxx != *curr_tray_xxx {
+            *curr_tray_xxx = new_tray_xxx;
+            *changed = true;
+        }
+    }
+    fn update_std_tray_xxx(curr_tray_xxx: &mut i32, message_tray_xxx: &Option<i32>, changed: &mut bool) {
+        if let Some(new_tray_xxx) = message_tray_xxx {
+            if new_tray_xxx != curr_tray_xxx {
+                *curr_tray_xxx = *new_tray_xxx;
+                *changed = true;
+            }
+        }
+    }
+
     #[allow(non_snake_case)]
-    pub fn process_print_message__ams(&mut self, ams: &PrintAms) -> (bool, HashMap<usize, SpoolId>, bool) {
+    pub fn process_print_message__tray_xxx(&mut self, print: &bambu_api::PrintData) -> bool {
+        let mut tray_xxx_change_made = false;
+
+        if let Some(extruder) = print.device.as_ref().and_then(|d| d.extruder.as_ref()) {
+            if let Some(state) = &extruder.state {
+                self.extruder_state = Some(*state);
+            }
+            for (extruder, info) in extruder.info.iter().enumerate() {
+                if extruder > 1 {
+                    break;
+                };
+                Self::update_h2d_tray_xxx(&mut self.tray_tar[extruder], &info.star, &mut tray_xxx_change_made);
+                Self::update_h2d_tray_xxx(&mut self.tray_now[extruder], &info.snow, &mut tray_xxx_change_made);
+                Self::update_h2d_tray_xxx(&mut self.tray_pre[extruder], &info.spre, &mut tray_xxx_change_made);
+            }
+        } else if let Some(ams) = &print.ams {
+            // debug!(">>>>> old version tray_xxx data");
+            Self::update_std_tray_xxx(&mut self.tray_tar[0], &ams.tray_tar, &mut tray_xxx_change_made);
+            Self::update_std_tray_xxx(&mut self.tray_now[0], &ams.tray_now, &mut tray_xxx_change_made);
+            Self::update_std_tray_xxx(&mut self.tray_pre[0], &ams.tray_pre, &mut tray_xxx_change_made);
+        }
+        tray_xxx_change_made
+    }
+
+    #[allow(non_snake_case)]
+    pub fn process_print_message__ams(&mut self, ams: &PrintAms) -> (bool, HashMap<usize, SpoolId>) {
         let mut change_made = false;
         let prev_tray_exist_bits = *self.tray_exist_bits();
 
@@ -1313,30 +1402,6 @@ impl BambuPrinter {
                     self.tray_reading_bits = Some(tray_reading_bits);
                     change_made = true;
                 }
-            }
-        }
-        let mut tray_xxx_change_made = false;
-        if let Some(new_tray_tar) = ams.tray_tar {
-            if new_tray_tar != self.tray_tar {
-                self.tray_tar = new_tray_tar;
-                change_made = true;
-                tray_xxx_change_made = true;
-            }
-        }
-
-        if let Some(new_tray_now) = ams.tray_now {
-            if new_tray_now != self.tray_now {
-                self.tray_now = new_tray_now;
-                change_made = true;
-                tray_xxx_change_made = true;
-            }
-        }
-
-        if let Some(new_tray_pre) = ams.tray_pre {
-            if new_tray_pre != self.tray_pre {
-                self.tray_pre = new_tray_pre;
-                change_made = true;
-                tray_xxx_change_made = true;
             }
         }
 
@@ -1394,7 +1459,7 @@ impl BambuPrinter {
         // if self.ams_exist_bits.is_none() {
         //     self.ams_exist_bits = Some(_derived_ams_exist_bits);
         // }
-        (change_made, removed_tags, tray_xxx_change_made)
+        (change_made, removed_tags)
     }
 
     pub fn process_print_message(&mut self, print: &bambu_api::PrintData) -> (bool, HashMap<usize, SpoolId>) {

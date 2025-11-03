@@ -668,17 +668,17 @@ export global AppState {
     }
 
     pure public function stable-firmware-updates-available() -> bool {
-      return self.firmwares.console-stable-newer || self.firmwares.scale-stable-newer;
+        return self.firmwares.console-stable-newer || self.firmwares.scale-stable-newer;
     }
 
     pure public function unstable-firmware-updates-available() -> bool {
-      return self.firmwares.console-unstable-newer || self.firmwares.scale-unstable-newer;
+        return self.firmwares.console-unstable-newer || self.firmwares.scale-unstable-newer;
     }
 
     function empty-trays-state() -> [UiTray] {
         return [
   // External
-        {
+            {
                 id: 254,
                 external: true,
                 spool-state: UiTrayState.Unknown,
@@ -695,7 +695,7 @@ export global AppState {
             },
 
   // AMS: 0
-        {
+            {
                 id: 0,
                 external: false,
                 spool-state: UiTrayState.Unknown,
@@ -757,7 +757,7 @@ export global AppState {
             },
 
   // AMS 1
-        {
+            {
                 id: 4,
                 external: false,
                 spool-state: UiTrayState.Unknown,
@@ -818,7 +818,7 @@ export global AppState {
                 used-in-print: false,
             },
   // AMS 2
-        {
+            {
                 id: 8,
                 external: false,
                 spool-state: UiTrayState.Unknown,
@@ -879,7 +879,7 @@ export global AppState {
                 used-in-print: false,
             },
   // AMS 3
-        {
+            {
                 id: 12,
                 external: false,
                 spool-state: UiTrayState.Unknown,
@@ -940,7 +940,7 @@ export global AppState {
                 used-in-print: false,
             },
   // AMS-HT: 4
-        {
+            {
                 id: 16,
                 external: false,
                 spool-state: UiTrayState.Unknown,

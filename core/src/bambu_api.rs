@@ -108,6 +108,7 @@ pub struct PrintData {
     pub ams: Option<PrintAms>,
     // pub ipcam: Option<PrintIpcam>,
     pub vt_tray: Option<PrintTray>, // was PrintVtTray
+    pub vir_slot: Option<Vec<PrintTray>>,
     // pub lights_report: Option<Vec<PrintLightsReport>>,
     // pub upgrade_state: Option<PrintUpgradeState>,
     pub command: Option<String>,
@@ -139,6 +140,26 @@ pub struct PrintData {
     pub filament_id: Option<String>,
     pub filaments: Option<Vec<Filament>>,
     pub fun: Option<String>,
+    pub device: Option<PrintDevice>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrintDevice {
+    pub extruder: Option<PrintDeviceExtruder>
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrintDeviceExtruder {
+    pub info: Vec<PrintDeviceExtruderInfo>,
+    pub state: Option<i32>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrintDeviceExtruderInfo {
+    pub id: i32,
+    pub snow: i32,
+    pub spre: i32,
+    pub star: i32,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
