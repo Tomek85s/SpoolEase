@@ -454,6 +454,8 @@ async fn main(spawner: Spawner) {
     yield_now().await;
     yield_now().await;
     term_info!("Booting from partition {}", boot_partition);
+    term_info!("Firmware: {} version {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+
     if sdcard_available {
         term_info!("SD Card installed");
     } else {

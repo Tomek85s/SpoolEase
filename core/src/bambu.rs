@@ -629,6 +629,7 @@ impl BambuPrinter {
             "01S" => PrinterModel::P1P,
             "039" => PrinterModel::A1,
             "030" => PrinterModel::A1Mini,
+            "22E" => PrinterModel::P2S,
             _ => PrinterModel::Unknown,
         }
     }
@@ -641,6 +642,7 @@ impl BambuPrinter {
             PrinterModel::X1E => PrinterModelSeries::X1,
             PrinterModel::P1P => PrinterModelSeries::P1,
             PrinterModel::P1S => PrinterModelSeries::P1,
+            PrinterModel::P2S => PrinterModelSeries::P2,
             PrinterModel::A1Mini => PrinterModelSeries::A1,
             PrinterModel::A1 => PrinterModelSeries::A1,
             PrinterModel::H2D => PrinterModelSeries::H2,
@@ -3089,7 +3091,7 @@ impl TagInformationV1 {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PrinterModel {
     Unknown,
     X1,
@@ -3097,6 +3099,7 @@ pub enum PrinterModel {
     X1E,
     P1P,
     P1S,
+    P2S,
     A1Mini,
     A1,
     H2D,
@@ -3110,6 +3113,7 @@ pub enum PrinterModelSeries {
     P1,
     A1,
     H2,
+    P2,
 }
 
 #[derive(Clone, Debug)]
@@ -3144,6 +3148,7 @@ impl TryFrom<SSDPInfo> for BambuSSDPInfo {
                     "C13" => PrinterModel::X1E,
                     "N1" => PrinterModel::A1Mini,
                     "N2" => PrinterModel::A1,
+                    "N7" => PrinterModel::P2S,
                     _ => PrinterModel::Unknown,
                 }),
 

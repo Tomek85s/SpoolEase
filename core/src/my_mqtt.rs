@@ -30,6 +30,7 @@ use mqttrust::{
 use framework::prelude::*;
 
 use crate::bambu::BambuPrinter;
+use crate::bambu::PrinterModel;
 
 const DEBUG_MODE: (bool, Ipv4Address) = (false, Ipv4Address::new(192, 168, 10, 51));
 
@@ -359,12 +360,19 @@ pub async fn generic_mqtt_task<
     let tls = framework.borrow().tls;
     let printer_log_id = bambu_printer.borrow().printer_number;
     let printer_name = bambu_printer.borrow().printer_name().clone();
+    let printer_model = bambu_printer.borrow().model();
 
     let mut socket_rx_buffer = vec![0u8; rx_socket_buffer_size];
     let mut socket_tx_buffer = vec![0u8; tx_socket_buffer_size];
 
     let socket_rx_buffer = socket_rx_buffer.as_mut_slice();
     let socket_tx_buffer = socket_tx_buffer.as_mut_slice();
+
+    let bambu_certs = [
+        concat!(include_str!("./certs/bambulab.pem"), "\0").as_bytes(),
+        concat!(include_str!("./certs/bambulab_p2s.pem"), "\0").as_bytes(),
+    ];
+    let mut bambu_cert_index = 0;
 
     'establish_communication: loop {
         Framework::wait_for_wifi(&framework).await;
@@ -451,7 +459,7 @@ pub async fn generic_mqtt_task<
             }
         } else {
             esp_mbedtls::Certificates {
-                ca_chain: X509::pem(concat!(include_str!("./certs/bambulab.pem"), "\0").as_bytes()).ok(),
+                ca_chain: X509::pem(bambu_certs[bambu_cert_index]).ok(),
                 ..Default::default()
             }
         };
@@ -473,11 +481,25 @@ pub async fn generic_mqtt_task<
             }
         };
 
-        term_info!("[{}] Establishing TLS connection with Printer", printer_log_id);
+        term_info!("[{}] Establishing TLS connection with Printer {:?}", printer_log_id, servername);
+        info!("[{printer_log_id}] Printer model is {printer_model:?}");
 
         if let Err(e) = session.connect().await {
-            // any point in retrying several times when tls fail?
-            term_error!("[{}] Unexpected error during tls handshake {:?}", printer_log_id, e);
+            if matches!(e, TlsError::MbedTlsError(-9984)) {
+                if printer_model != PrinterModel::P2S || bambu_cert_index == 1 {
+                    // report error only after trying both certs
+                    term_error!("[{}] Unexpected error during tls handshake {:?}", printer_log_id, e);
+                } else {
+                    // P2S and first cert
+                    warn!("[{}] P2S first certificates didn't work, will try the second option on next connect trial", printer_log_id);
+                }
+                if printer_model == PrinterModel::P2S {
+                    debug!("[{printer_log_id}] P2S - Switching certificates for TLS");
+                    bambu_cert_index = 1-bambu_cert_index;
+                }
+            } else {
+               term_error!("[{}] Unexpected error during tls handshake {:?}", printer_log_id, e);
+            }
             Timer::after(Duration::from_millis(500)).await;
             continue;
         }

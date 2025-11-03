@@ -2147,6 +2147,7 @@ impl BambuPrinterObserver for ViewModel {
                 bambu::PrinterModelSeries::P1 => 1,
                 bambu::PrinterModelSeries::A1 => 1,
                 bambu::PrinterModelSeries::H2 => 2,
+                bambu::PrinterModelSeries::P2 => 2,
             }
         } else {
             1
@@ -2154,7 +2155,7 @@ impl BambuPrinterObserver for ViewModel {
 
         let chars_to_replace_for_file = match printer.model_series() {
             bambu::PrinterModelSeries::P1 | bambu::PrinterModelSeries::A1 => "!@#\'@/",
-            bambu::PrinterModelSeries::X1 | bambu::PrinterModelSeries::H2 | bambu::PrinterModelSeries::Unknown => "/",
+            bambu::PrinterModelSeries::X1 | bambu::PrinterModelSeries::H2 | bambu::PrinterModelSeries::P2 | bambu::PrinterModelSeries::Unknown => "/",
         };
 
         let base_threemf_ftp_filename: String = subtask_name

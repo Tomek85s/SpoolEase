@@ -53,6 +53,7 @@ Temporary Items
 
 ./src/certs
 !./src/certs/bambulab.pem
+!./src/certs/bambulab_p2s.pem
 .envrc
 
 _untracked/
