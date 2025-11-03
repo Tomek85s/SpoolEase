@@ -11,7 +11,6 @@ use embassy_futures::select::Either3;
 use embassy_net::tcp::State;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::IpEndpoint;
-use embassy_net::Ipv4Address;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::PubSubChannel;
@@ -31,8 +30,6 @@ use framework::prelude::*;
 
 use crate::bambu::BambuPrinter;
 use crate::bambu::PrinterModel;
-
-const DEBUG_MODE: (bool, Ipv4Address) = (false, Ipv4Address::new(192, 168, 10, 51));
 
 #[derive(Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -351,16 +348,18 @@ pub async fn generic_mqtt_task<
     write_timeout: Duration,
     bambu_printer: Rc<RefCell<BambuPrinter>>,
 ) -> ! {
-    if DEBUG_MODE.0 {
-        warn!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-        warn!("!!!!!!! Running in DEBUG MODE !!!!!!!!!!!");
-        warn!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-    }
     let stack = framework.borrow().stack;
     let tls = framework.borrow().tls;
     let printer_log_id = bambu_printer.borrow().printer_number;
     let printer_name = bambu_printer.borrow().printer_name().clone();
     let printer_model = bambu_printer.borrow().model();
+    let debug = bambu_printer.borrow().printer_selector_name.to_lowercase() == "simulator";
+
+    if debug {
+        warn!("[{printer_log_id}] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        warn!("[{printer_log_id}] !!!!!!! Running in DEBUG MODE !!!!!!!!!!!");
+        warn!("[{printer_log_id}] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    }
 
     let mut socket_rx_buffer = vec![0u8; rx_socket_buffer_size];
     let mut socket_tx_buffer = vec![0u8; tx_socket_buffer_size];
@@ -405,54 +404,33 @@ pub async fn generic_mqtt_task<
         );
         let mut socket_error_count = 0;
 
-        if DEBUG_MODE.0 {
-            let simulator_remote_endpoint = (DEBUG_MODE.1, 8883);
-            match socket.connect(simulator_remote_endpoint).await {
-                Ok(()) => (),
-                Err(e) => {
-                    // match e {
-                    //     ConnectError::InvalidState | ConnectError::ConnectionReset => {
-                    //     }
-                    //     ConnectError::TimedOut => (),
-                    //     ConnectError::NoRoute => (),
-                    // }
-                    socket_error_count += 1;
-                    if socket_error_count % 10 == 0 {
-                        term_error!("[{}] Unexpected error connecting socket {:?}", printer_log_id, e);
-                    }
-                    Timer::after(Duration::from_millis(1000)).await;
-                    continue;
+        match socket.connect(remote_endpoint).await {
+            Ok(()) => (),
+            Err(e) => {
+                // match e {
+                //     ConnectError::InvalidState | ConnectError::ConnectionReset => {
+                //     }
+                //     ConnectError::TimedOut => (),
+                //     ConnectError::NoRoute => (),
+                // }
+                socket_error_count += 1;
+                if socket_error_count % 10 == 0 {
+                    term_error!("[{}] Unexpected error connecting socket {:?}", printer_log_id, e);
                 }
-            }
-        } else {
-            match socket.connect(remote_endpoint).await {
-                Ok(()) => (),
-                Err(e) => {
-                    // match e {
-                    //     ConnectError::InvalidState | ConnectError::ConnectionReset => {
-                    //     }
-                    //     ConnectError::TimedOut => (),
-                    //     ConnectError::NoRoute => (),
-                    // }
-                    socket_error_count += 1;
-                    if socket_error_count % 10 == 0 {
-                        term_error!("[{}] Unexpected error connecting socket {:?}", printer_log_id, e);
-                    }
-                    Timer::after(Duration::from_millis(1000)).await;
-                    continue;
-                }
+                Timer::after(Duration::from_millis(1000)).await;
+                continue;
             }
         }
 
         term_info!("[{}] Connected to Printer {}", printer_log_id, printer_name);
 
-        let servername = if DEBUG_MODE.0 {
+        let servername = if debug {
             CString::new("simulator").unwrap()
         } else {
             CString::new(printer_serial).unwrap()
         };
 
-        let certificates = if DEBUG_MODE.0 {
+        let certificates = if debug {
             esp_mbedtls::Certificates {
                 ca_chain: X509::pem(concat!(include_str!("./certs/simulator.pem"), "\0").as_bytes()).ok(),
                 ..Default::default()
