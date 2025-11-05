@@ -17,11 +17,12 @@ use embedded_io_async::Read;
 use esp_mbedtls::{Certificates, TlsVersion, X509};
 use framework::{debug, error, info, prelude::Framework};
 use serde::{Deserialize, Serialize};
+use snafu::AsErrorSource;
 use url::{Position, Url};
 
 use crate::{
     gcode_analysis::{FilamentUsageEntry, GcodeFilamentCalc},
-    my_ftp::MyFtps,
+    my_ftp::{self, MyFtps},
     threemf_extractor::{FeedStatus, ThreemfExtractor},
 };
 
@@ -149,7 +150,7 @@ pub struct GcodeAnalysisRequest {
     pub ip: Ipv4Address,
     pub serial: String,
     pub access_code: String,
-    pub threemf_ftp_filename: String,
+    pub threemf_ftp_filename: String, // not including full path, just fixed name based on printer model
     pub printer_index: usize,
     pub printer_number: usize,
     pub job_number: i32,
@@ -202,7 +203,8 @@ pub async fn fetch_gcode_analysis_task(
         let fetch_res = match gcode_analysis_request.fetch_3mf {
             Fetch3mf::CloudHttp
                 if !(gcode_analysis_request.threemf_url.starts_with("file://")
-                    || gcode_analysis_request.threemf_url.starts_with("ftp://")) =>
+                    || gcode_analysis_request.threemf_url.starts_with("ftp://")
+                    || gcode_analysis_request.threemf_url.starts_with("brtc://")) =>
             {
                 fetch_gcode_analysis_task_cloud_http(
                     framework.clone(),
@@ -271,7 +273,7 @@ async fn fetch_gcode_analysis_task_printer_ftp(
     let ip = gcode_analysis_request.ip;
     let serial = gcode_analysis_request.serial;
     let access_code = gcode_analysis_request.access_code;
-    let threemf_ftp_filename = gcode_analysis_request.threemf_ftp_filename;
+
     // let plate_idx = gcode_analysis_request.plate_idx;
     let gcode_filename_in_3mf = gcode_analysis_request.gcode_filename_in_3mf;
 
@@ -381,20 +383,29 @@ async fn fetch_gcode_analysis_task_printer_ftp(
     let threemf_filename = if let Some(filename) = threemf_url.strip_prefix("file:///sdcard") {
         // seen on X1C
         // file:///sdcard/Skadis_Storage_Box_Scale_Small_Plate 1.gcode.3mf
+        // file is in the ftp root 
         filename.to_string()
     } else if let Some(filename) = threemf_url.strip_prefix("file:///mnt/sdcard") {
         // seen on X1C when printing from console
         // file:///mnt/sdcard/80_92_120_140mm_Fan_Dust_Filter.gcode.3mf
         // the replacement is since such case was witnessed on x1c when printing from console
+        // file is in the ftp root
         filename.replace("%25", "%").to_string()
     } else if let Some(filename) = threemf_url.strip_prefix("ftp:/") {
         // ftp://Cable_Organizer_Cable_Clip.gcode.3mf
+        // file is in the ftp root
         filename.to_string()
+    } else if let Some(filename) = threemf_url.strip_prefix("brtc://emmc") {
+        // seen on P2S when printing in DEV mode
+        // brtc://emmc/ftp.gcode.3mf
+        format!("/cache{filename}")
     } else {
         // this is the case where we use the subtask_name field from the mqtt
         // after some chars were fixed (in view_model) based on the printer type
         // not nice to do it there, but didn't want to propgate printer type here now.
-        threemf_ftp_filename
+
+        // one example for such case is when file is sent over http but setting is to retrieve using ftp 
+        format!("/cache/{}.3mf", gcode_analysis_request.threemf_ftp_filename)
     };
 
     let mut buf = alloc::vec![0;16384];
@@ -498,6 +509,11 @@ async fn fetch_gcode_analysis_task_printer_ftp(
         }
         Err(err) => {
             error!("[{printer_log_id}] Error initiating retrieve of 3mf file {threemf_filename} {err:?}");
+            // if let my_ftp::Error::Ftp { response } = err {
+            //     if response.code == 550 {
+            //         contine here
+            //     }
+            // }
             return FetchSubtaskResult::Failed;
         }
     };
@@ -544,7 +560,7 @@ async fn fetch_gcode_analysis_task_cloud_http(
         }
     };
 
-    let subtask_name = gcode_analysis_request.threemf_ftp_filename;
+    let threemf_ftp_filename = gcode_analysis_request.threemf_ftp_filename;
     let gcode_filename_in_3mf = gcode_analysis_request.gcode_filename_in_3mf;
     let threemf_url = gcode_analysis_request.threemf_url;
 
@@ -679,7 +695,7 @@ async fn fetch_gcode_analysis_task_cloud_http(
     }
 
     // it looks like in the gcode file name (not in the bbl file name) bambu uses for gcode filename the text until "." in case there is such
-    let threemf_filename = format!("/cache/{subtask_name}.3mf");
+    let threemf_filename = format!("{threemf_ftp_filename}.3mf");
 
     let mut buf = alloc::vec![0;16384];
     let mut gcode_calc = GcodeFilamentCalc::new();

@@ -2131,15 +2131,16 @@ impl BambuPrinterObserver for ViewModel {
         let printer_selector_name = printer.printer_selector_name.clone();
         self.gcode_last_job_number += 1;
 
-        let subtask_name = print_project.subtask_name.clone();
-        let threemf_url = print_project.threemf_url.clone();
-        let gcode_filename_in_3mf = print_project.gcode_filename_in_3mf.clone();
+        let subtask_name = print_project.subtask_name.clone(); // subtask_name field in the project_file message
+        let threemf_url = print_project.threemf_url.clone(); // url field
+        let gcode_filename_in_3mf = print_project.gcode_filename_in_3mf.clone(); // the param field - file inside the gcode
 
         info!("[{printer_number}] Received request for gcode analysis {subtask_name} {gcode_filename_in_3mf}");
 
         let required_tls_slots = if printer.fetch_3mf == Fetch3mf::PrinterFtp
-            || gcode_filename_in_3mf.starts_with("file://")
-            || gcode_filename_in_3mf.starts_with("ftp://")
+            || threemf_url.starts_with("file://")
+            || threemf_url.starts_with("ftp://")
+            || threemf_url.starts_with("brtc://")
         {
             // only in case of ftp, the number of FTP (not HTTP) tls slots depends on the printer model
             match printer.model_series() {
@@ -2159,11 +2160,14 @@ impl BambuPrinterObserver for ViewModel {
             bambu::PrinterModelSeries::X1 | bambu::PrinterModelSeries::H2 | bambu::PrinterModelSeries::P2 | bambu::PrinterModelSeries::Unknown => "/",
         };
 
-        let base_threemf_ftp_filename: String = subtask_name
+        let mut threemf_ftp_filename: String = subtask_name
             .chars()
             .map(|c| if chars_to_replace_for_file.contains(c) { '_' } else { c })
             .collect();
-        let threemf_ftp_filename = format!("/cache/{base_threemf_ftp_filename}.3mf");
+
+        if matches!(printer.model_series(),bambu::PrinterModelSeries::P2) {
+            threemf_ftp_filename = format!("{}.gcode", threemf_ftp_filename);
+        }
 
         let ftp_memory_save = required_tls_slots == 1;
 
@@ -2174,7 +2178,7 @@ impl BambuPrinterObserver for ViewModel {
             access_code,
             printer_number,
             printer_index,
-            threemf_ftp_filename,
+            threemf_ftp_filename, // file in format /cache/... with 3mf added, why do it here?
             job_number: self.gcode_last_job_number,
             threemf_url,
             gcode_filename_in_3mf,

@@ -41,8 +41,8 @@ impl<E: core::fmt::Debug> core::fmt::Display for DebugWrap<E> {
 
 #[derive(Debug, Default)]
 pub struct ControlResponse {
-    code: i32,
-    string: String,
+    pub code: i32,
+    pub string: String,
 }
 
 pub struct MyFtps<'a, T>

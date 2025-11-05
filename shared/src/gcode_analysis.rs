@@ -97,6 +97,7 @@ impl GcodeFilamentCalc {
             let string_to_process = core::str::from_utf8(buffer_to_process)
                 .whatever_context("gcode isn't valid utf8")?;
             for line in string_to_process.lines() {
+                let line = line.trim();
                 self.curr_gcode_line += 1;
                 // println!("// {}, {}", self.gcode_buffer_line, line);
                 if line.starts_with("; CHANGE_LAYER") {

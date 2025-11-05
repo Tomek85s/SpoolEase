@@ -79,8 +79,8 @@ impl Default for ConsumeIndexState {
 pub struct PrintProject {
     pub project_id:  String, 
     pub subtask_name: String,
-    pub threemf_url: String,
-    pub gcode_filename_in_3mf: String,
+    pub threemf_url: String, // url field
+    pub gcode_filename_in_3mf: String, // param field, the gcode file inside the 3mf
     pub(super) ams_mapping: Vec<i32>,
     pub(super) ams_mapping2: Option<Vec<AmsMapping2Entry>>,
     pub(super) use_ams: Option<bool>,
@@ -184,10 +184,12 @@ impl BambuPrinter {
             let use_ams = print.use_ams;
             info!("[{printer_log_id}] Print project started: name: '{subtask_name}', using ams slots: {ams_mapping:?}, {ams_mapping2:?}");
             let mut curr_print_project = PrintProject::new(project_id, subtask_name, url, param, ams_mapping, ams_mapping2, use_ams);
+
             // in case of http can already fetch now and not wait for printer to download first
             if self.fetch_3mf == Fetch3mf::CloudHttp
                 || curr_print_project.threemf_url.starts_with("ftp://")
                 || curr_print_project.threemf_url.starts_with("file://")
+                || curr_print_project.threemf_url.starts_with("brtc://")
             {
                 let job_number = self.notify_request_gcode_analysis(&curr_print_project);
                 curr_print_project.gcode_analysis = GcodeAnalysis::Requested {
