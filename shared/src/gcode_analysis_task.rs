@@ -399,7 +399,12 @@ async fn fetch_gcode_analysis_task_printer_ftp(
         // seen on P2S when printing in DEV mode
         // brtc://emmc/ftp.gcode.3mf
         alloc::vec![format!("/cache{filename}")]
-    } else {
+    } else if let Some(filename) = threemf_url.strip_prefix("file:///media/usb0") {
+        // seen on H2D when doing a reprint
+        // file:///media/usb0/Cube.gcode.3mf
+        alloc::vec![format!("{filename}")]
+    }
+    else {
         // this is the case where we use the subtask_name field from the mqtt
         // after some chars were fixed (in view_model) based on the printer type
         // not nice to do it there, but didn't want to propgate printer type here now.

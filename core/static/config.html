@@ -297,6 +297,61 @@
       </button>
     </div>
 
+    <!-- Filaments Section -->
+    <div class="section" id="filaments-section">
+      <h2 class="section-title">Custom Slicer Filaments</h2>
+
+      <div class="form-row">
+        <div style="display: flex; align-items: center; gap: 10px;>
+            <label for="custom-filaments-text"
+              >Custom Filaments CSV:</label
+            >
+            <button class="add-btn" style="margin-left:auto" type="button" onclick="selectAndProcessCustomFilaments()">Create List (On Desktop)</button>
+            <input id="folderInput" type="file"  style="display:none" webkitdirectory multiple onchange="processFiles(event)" />
+        </div>
+        <textarea
+          class="csv-text"
+          id="custom-filaments-text"
+          oninput="handleCSVTextAreaInput(event, 'custom-filaments-text', 'custom-filaments-chars-left', 4000)"
+          placeholder="- Example (don't fill manually - normally should be auto generated):
+P714fe8c,ELEGOO PLA Pro,190,240,PLA
+Pd7bcff9,FLASHFORGE ASA Basic,240,280,ASA
+Pda16356,SUNLU PLA PLA + 2,190,240,PLA"
+        ></textarea>
+
+        <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 10px;">
+          <span id="custom-filaments-chars-left" class="csv-chars-left">0</span>
+        </div>
+        <p><b>First, add your custom filaments <a href="https://wiki.bambulab.com/en/bambu-studio/create-filament">in the slicer</a>.</b></p>
+        
+        <p>Then, press <b>"Create List"</b> Button and Select Folder as Explained Here:</p>
+        <label>On MacOS</label>
+          <p class="i0">/Users</p>
+          <p class="i1">/{user-name}</p>
+          <p class="i2">/Library &nbsp;&nbsp;&nbsp;⟸ hidden, use CMD+SHIFT+'.' to unhide</p>
+          <p class="i3">/Application Support</p>
+          <p class="i4">/BambuStudio or OrcaSlicer</p>
+          <p class="i5">/user</p>
+        <label>On Windows</label>
+          <p class="i0">C:\Users</p>
+          <p class="i1">\{user-name}</p>
+          <p class="i2">\AppData</p>
+          <p class="i3">\Roaming</p>
+          <p class="i4">\BambuStudio or OrcaSlicer</p>
+          <p class="i5">\user</p>
+      </div>
+
+      <button
+        id="filaments-apply"
+        type="button"
+        class="apply-btn"
+        onclick="applyFilamentsSettings()"
+        disabled
+      >
+        Apply
+      </button>
+    </div>
+
     <!-- Spools Weights Section -->
     <div class="section" id="spools-section">
       <h2 class="section-title">My Spools List</h2>
@@ -364,55 +419,6 @@ ProtoPasta 500g - Cardboard - 84g,84"
       </div>
     </div>
 
-
-    <!-- Filaments Section -->
-    <div class="section" id="filaments-section">
-      <h2 class="section-title">Custom Filaments</h2>
-
-      <div class="form-row">
-        <div style="display: flex; align-items: center; gap: 10px;>
-            <label for="custom-filaments-text"
-              >Custom Filaments CSV:</label
-            >
-            <button class="add-btn" style="margin-left:auto" type="button" onclick="selectAndProcessCustomFilaments()">Create List (On Desktop)</button>
-            <input id="folderInput" type="file"  style="display:none" webkitdirectory multiple onchange="processFiles(event)" />
-        </div>
-        <textarea
-          class="csv-text"
-          id="custom-filaments-text"
-          oninput="handleCSVTextAreaInput(event, 'custom-filaments-text', 'custom-filaments-chars-left', 4000)"
-          placeholder="- Example (normally should be auto generated):
-P714fe8c,ELEGOO PLA Pro,190,240
-Pd7bcff9,FLASHFORGE ASA Basic,240,280
-Pda16356,SUNLU PLA PLA + 2,190,240"
-        ></textarea>
-        <p>Press "Create List" Button and Select Folder as Explained Here:</p>
-        <label>On MacOS</label>
-          <p class="i0">/Users</p>
-          <p class="i1">/{user-name}</p>
-          <p class="i2">/Library &nbsp;&nbsp;&nbsp;⟸ hidden, use CMD+SHIFT+'.' to unhide</p>
-          <p class="i3">/Application Support</p>
-          <p class="i4">/BambuStudio or OrcaSlicer</p>
-          <p class="i5">/user</p>
-        <label>On Windows</label>
-          <p class="i0">C:\Users</p>
-          <p class="i1">\{user-name}</p>
-          <p class="i2">\AppData</p>
-          <p class="i3">\Roaming</p>
-          <p class="i4">\BambuStudio or OrcaSlicer</p>
-          <p class="i5">\user</p>
-      </div>
-
-      <button
-        id="filaments-apply"
-        type="button"
-        class="apply-btn"
-        onclick="applyFilamentsSettings()"
-        disabled
-      >
-        Apply
-      </button>
-    </div>
 
     <!-- OTA Section -->
 
