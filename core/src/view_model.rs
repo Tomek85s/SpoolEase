@@ -1440,7 +1440,13 @@ impl ViewModel {
                         });
                         Some(true)
                     } else {
-                        self.message_box("Staging Notice", "No Spool in Staging", "", crate::app::StatusType::Error, 0);
+                        self.message_box(
+                            "Staging Notice",
+                            "No Spool in Staging\nCan't Update Spool Weight",
+                            "See Documentation for More Details",
+                            crate::app::StatusType::Error,
+                            0,
+                        );
                         Some(false)
                     }
                 }
@@ -1472,10 +1478,10 @@ impl ViewModel {
         } else {
             info!("User Error: Reqeust to store tag with weight but no tag information in staging");
 
-            ui_app_state.invoke_show_message_box(
+            self.message_box(
                 "Staging Notice".into(),
-                "No Spool Tag in Staging".into(),
-                "Can't Update Spool Weight".into(),
+                "No Spool in Staging\nCan't Update Spool Weight",
+                "See Documentation for More Details",
                 crate::app::StatusType::Error,
                 -1,
             );

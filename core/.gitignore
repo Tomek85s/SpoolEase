@@ -57,8 +57,8 @@ Temporary Items
 .envrc
 
 _untracked/
-deploy-debug.sh
-deploy-prod.sh
-deploy-beta.sh
-deploy-rel.sh
+# deploy-debug.sh
+# deploy-prod.sh
+# deploy-beta.sh
+# deploy-rel.sh
 static/pkg

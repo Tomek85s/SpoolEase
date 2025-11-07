@@ -179,11 +179,16 @@ impl BambuPrinter {
             return false;
         }
         // TODO: theoretically all are options so could 'take' instead of clone
-        if let (Some(project_id), Some(subtask_name), Some(ams_mapping), Some(url), Some(param)) = (&print.project_id, &print.subtask_name, &print.ams_mapping, &print.url, &print.param) {
+        if let (Some(subtask_name), Some(ams_mapping), Some(url), Some(param)) = (&print.subtask_name, &print.ams_mapping, &print.url, &print.param) {
             let ams_mapping2 = print.ams_mapping2.clone();
             let use_ams = print.use_ams;
+            let project_id = if let Some(project_id) = &print.project_id {
+               project_id.to_string()
+            } else {
+                format!("display_print_{:?}", print.sequence_id)
+            };
             info!("[{printer_log_id}] Print project started: name: '{subtask_name}', using ams slots: {ams_mapping:?}, {ams_mapping2:?}");
-            let mut curr_print_project = PrintProject::new(project_id, subtask_name, url, param, ams_mapping, ams_mapping2, use_ams);
+            let mut curr_print_project = PrintProject::new(&project_id, subtask_name, url, param, ams_mapping, ams_mapping2, use_ams);
 
             // in case of http can already fetch now and not wait for printer to download first
             if self.fetch_3mf == Fetch3mf::CloudHttp
