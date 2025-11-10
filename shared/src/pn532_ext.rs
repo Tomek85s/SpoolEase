@@ -72,21 +72,21 @@ where
     I: pn532::Interface,
 {
     Timer::after_millis(10).await; // wait for stable RF field
-    assert!(buf.len() % 4 == 0);
-    let num_pages = buf.len() / 4;
+    let num_pages = (buf.len()+3) / 4; // complement to include partial data on last page
 
     let end_time = Instant::now() + timeout;
     let last_err;
 
     /*'single_write:*/
+    let mut data_to_write = [0u8;4];
     for page_offset in 0..num_pages {
         let page_byte_offset = page_offset * 4;
-        let data_to_write = [
-            buf[page_byte_offset],
-            buf[page_byte_offset + 1],
-            buf[page_byte_offset + 2],
-            buf[page_byte_offset + 3],
-        ];
+        let n = min(4, buf.len()-page_byte_offset);
+        data_to_write[.. n].copy_from_slice(&buf[page_byte_offset..page_byte_offset+n]);
+        if n < 4 {
+            data_to_write[n..].fill(0);
+        }
+
         if Instant::now() > end_time {
             error!("Tag read timeout error");
             return Err(Error::Pn532Error(pn532::Error::TimeoutResponse)); // using the Pn532Error, not sure if good practice

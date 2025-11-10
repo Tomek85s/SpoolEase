@@ -3069,7 +3069,7 @@ dependencies = [
  "quote",
  "rowan",
  "smol_str 0.3.2",
- "strum 0.27.1",
+ "strum 0.27.2",
  "typed-index-collections",
  "url",
 ]
@@ -3111,7 +3111,7 @@ dependencies = [
  "scoped-tls-hkt",
  "scopeguard",
  "slab",
- "strum 0.27.1",
+ "strum 0.27.2",
  "sys-locale",
  "unicode-linebreak",
  "unicode-script",
@@ -3842,7 +3842,7 @@ dependencies = [
  "objc2-foundation 0.3.1",
  "once_cell",
  "png",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "windows-sys 0.59.0",
 ]
 
@@ -3860,6 +3860,18 @@ name = "nb"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
+
+[[package]]
+name = "ndef-rs"
+version = "0.2.2"
+source = "git+https://github.com/yanshay/ndef-rs?branch=yanshay_no_std#049b3080be17996fb02ab0c29980c99a1dadf3e6"
+dependencies = [
+ "anyhow",
+ "bitflags 2.9.0",
+ "no_std_io",
+ "strum 0.27.2",
+ "thiserror 2.0.17",
+]
 
 [[package]]
 name = "ndk"
@@ -4468,7 +4480,7 @@ dependencies = [
  "ryu",
  "serde",
  "serde-json-core",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -5198,6 +5210,7 @@ dependencies = [
  "hashbrown 0.15.2",
  "log",
  "miniz_oxide",
+ "ndef-rs",
  "no_std_io",
  "pn532",
  "serde",
@@ -5455,9 +5468,9 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.27.1"
+version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f64def088c51c9510a8579e3c5d67c65349dcf755e5479ad3d010aa6454e2c32"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
 dependencies = [
  "strum_macros 0.27.1",
 ]
@@ -5623,11 +5636,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.12"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
+checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
 dependencies = [
- "thiserror-impl 2.0.12",
+ "thiserror-impl 2.0.17",
 ]
 
 [[package]]
@@ -5643,9 +5656,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.12"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
+checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
 dependencies = [
  "proc-macro2",
  "quote",

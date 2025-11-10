@@ -16,6 +16,8 @@ use embassy_sync::channel::Channel;
 use embassy_time::{with_timeout, Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use hashbrown::HashMap;
+use ndef_rs::payload::UriPayload;
+use ndef_rs::NdefMessage;
 use serde::{Deserialize, Serialize};
 use shared::gcode_analysis_task::{
     fetch_gcode_analysis_task, Fetch3mf, FilamentUsage, GcodeAnalysisNotification, GcodeAnalysisNotificationChannel, GcodeAnalysisRequest,
@@ -1415,8 +1417,6 @@ impl ViewModel {
     }
 
     pub fn update_spool_weight_from_button(&self, scale_weight: ScaleWeight) -> Option<bool> {
-        let ui = self.ui_weak.unwrap();
-        let ui_app_state = ui.global::<crate::app::AppState>();
         if self.filament_staging.borrow().full_spool_rec().is_some() {
             match scale_weight {
                 ScaleWeight::Stable(weight) => {
@@ -1479,7 +1479,7 @@ impl ViewModel {
             info!("User Error: Reqeust to store tag with weight but no tag information in staging");
 
             self.message_box(
-                "Staging Notice".into(),
+                "Staging Notice",
                 "No Spool in Staging\nCan't Update Spool Weight",
                 "See Documentation for More Details",
                 crate::app::StatusType::Error,
@@ -2271,10 +2271,32 @@ impl SpoolTagObserver for ViewModel {
                 ui.unwrap().global::<crate::app::AppState>().invoke_erasing_succeeded();
             }
             Status::ReadSuccess(read_result) => match read_result {
-                spool_tag::ReadResult::NDEF { uid, text } => {
-                    if let Some(ndef_text) = text {
-                        if self.process_v1_tag_read(uid, ndef_text.as_str(), false) {
-                            return;
+                spool_tag::ReadResult::NDEF { uid, message } => {
+                    if let Some(ndef_bytes) = message {
+                        match NdefMessage::decode(ndef_bytes) {
+                            Ok(ndef) => {
+                                for (record_num, record) in ndef.records().iter().enumerate() {
+                                    debug!("NDEF record #{record_num}, type {:?}", core::str::from_utf8(record.record_type()));
+
+                                    if core::str::from_utf8(record.record_type()) == Ok("U") {
+                                        match UriPayload::try_from(record) {
+                                            Ok(uri) => {
+                                                info!("Scanned Tag with URI : {}", uri.full_uri());
+                                                if record_num == 0 && self.process_v1_tag_read(uid, &uri.full_uri(), false) {
+                                                    return;
+                                                }
+                                            }
+                                            Err(err) => {
+                                                error!("Error decoding NDEF uri {err:?}");
+                                            }
+                                        }
+                                    }
+                                    // if core::str::from_utf8(record.record_type()) == Ok("application/vnd.openprinttag") {
+                                    //     data = record.payload().to_vec();
+                                    // }
+                                }
+                            }
+                            Err(err) => error!("Error decoding NDEF data on tag {err:?}"),
                         }
                     }
                     // not V1 tag

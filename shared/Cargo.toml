@@ -51,6 +51,9 @@ edge-http = "0.5.0"
 embedded-io-async = { version = "0.6.1" }
 serde-csv-core = "0.3.2"
 
+# ndef-rs = { path = "../../../../../../OpenSourceProj/forked/ndef-rs/ndef", default-features = false}
+ndef-rs = { git = "https://github.com/yanshay/ndef-rs" , branch = "yanshay_no_std", default-features = false}
+
 [features]
 default = ["esp32s3"]
 

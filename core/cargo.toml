@@ -163,6 +163,8 @@ pn532 = { git = "https://github.com/yanshay/pn532", branch ="yanshay_async_full"
 # pn532 = { path="../../../../../OpenSourceProj/forked/pn532/", default-features = false }
 regex = { version = "1.11.1", default-features = false }
 shared = { path = "../shared/" }
+# ndef-rs = { path = "../../../../../../OpenSourceProj/forked/ndef-rs/ndef", default-features = false}
+ndef-rs = { git = "https://github.com/yanshay/ndef-rs" , branch = "yanshay_no_std", default-features = false}
 
 [features]
 default = ["esp32s3"]

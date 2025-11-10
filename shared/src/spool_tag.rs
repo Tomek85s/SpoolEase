@@ -128,7 +128,7 @@ pub enum Failure {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ReadResult {
-    NDEF { uid: Vec<u8>, text: Option<String> },
+    NDEF { uid: Vec<u8>, message: Option<Vec<u8>> }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -482,20 +482,23 @@ async fn nfc_task(
                             spool_tag_rc
                                 .borrow()
                                 .notify_tag_status(Status::FoundTagNowReading);
-                            match crate::nfc::read_ndef_record(
+                            match crate::nfc::read_ndef_payload(
                                 &mut pn532,
                                 Duration::from_millis(2000),
                             )
                             .await
                             {
                                 // TODO: combine
-                                Ok(read_record) => {
-                                    let result = read_record.map(|r| r.url_payload());
-                                    debug!("{:?}", result);
+                                Ok(read_ndef_message_payload) => {
+                                    if let Some(payload) = &read_ndef_message_payload {
+                                        debug!("Read NDEF message size {}", payload.len());
+                                    } else {
+                                        debug!("No NDEF message in tag");
+                                    }
                                     spool_tag_rc.borrow().notify_tag_status(Status::ReadSuccess(
                                         ReadResult::NDEF {
                                             uid: uid.uid().to_vec(),
-                                            text: result,
+                                            message: read_ndef_message_payload,
                                         },
                                     ));
                                     curr_operation_with_tag =

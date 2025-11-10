@@ -1,14 +1,17 @@
-use deku::{DekuContainerRead, DekuContainerWrite, DekuError};
+use alloc::vec::Vec;
 use embassy_time::Duration;
+use ndef_rs::{NdefMessage, NdefRecord, TNF, error::NdefError, payload::UriPayload, tag::{NFT2Tag, TlvValue}};
 
-use crate::pn532_ext::{ensure_tag_formatted, process_ntag_write_long, Esp32TimerAsync};
+use crate::pn532_ext::{Esp32TimerAsync, ensure_tag_formatted, process_ntag_write_long};
 
 #[derive(Debug)]
 pub enum Error<E: core::fmt::Debug> {
     Pn532ExtError(crate::pn532_ext::Error<E>),
     #[allow(dead_code)]
-    NdefReadError(DekuError),
     NotNdefFormatted,
+    NdefSizeError(usize),
+    NdefError(NdefError),
+    NdefBuildError,
 }
 
 impl<E: core::fmt::Debug> From<crate::pn532_ext::Error<E>> for Error<E> {
@@ -30,22 +33,6 @@ where
     Ok(())
 }
 
-#[allow(dead_code)]
-pub async fn write_ndef_text_record<I>(
-    pn532: &mut pn532::Pn532<I, Esp32TimerAsync>,
-    text: &str,
-    timeout: Duration,
-) -> Result<(), Error<I::Error>>
-where
-    I: pn532::Interface,
-{
-    let a_record = crate::ndef::Record::new_text_record_en(text);
-    let ndef_struct = crate::ndef::NDEFStructure::new(a_record);
-    ensure_tag_formatted(pn532, timeout).await?;
-    process_ntag_write_long(pn532, &ndef_struct.to_bytes().unwrap(), 4, timeout).await?;
-    Ok(())
-}
-
 pub async fn write_ndef_url_record<I>(
     pn532: &mut pn532::Pn532<I, Esp32TimerAsync>,
     url: &str,
@@ -54,17 +41,25 @@ pub async fn write_ndef_url_record<I>(
 where
     I: pn532::Interface,
 {
-    let a_record = crate::ndef::Record::new_url_record(url);
-    let ndef_struct = crate::ndef::NDEFStructure::new(a_record);
+    let ndef_record = NdefRecord::builder().tnf(TNF::WellKnown).payload(&UriPayload::from_string(url)).build().map_err(|_e| Error::NdefBuildError)?;
+    let message = NdefMessage::from(ndef_record);
+    let tlv = TlvValue::ndef_message(&message).map_err(|_e| Error::NdefBuildError)?;
+    let tag = NFT2Tag::builder().size_in_bytes(512).add_tlv(tlv).add_tlv(TlvValue::terminator()).build();
+    let tag_bytes = tag.to_bytes().map_err(|_e| Error::NdefBuildError)?;
+    if tag_bytes.len() < 4 {
+        return Err(Error::NdefBuildError);
+    }
     ensure_tag_formatted(pn532, timeout).await?;
-    process_ntag_write_long(pn532, &ndef_struct.to_bytes().unwrap(), 4, timeout).await?;
+    // Don't write page3 - it involves tag manufactured properties, ensure_tag_formatted does its best to take caare of page3
+    process_ntag_write_long(pn532, &tag_bytes[4..], 4, timeout).await?;
+
     Ok(())
 }
 
-pub async fn read_ndef_record<I>(
+pub async fn read_ndef_payload<I>(
     pn532: &mut pn532::Pn532<I, Esp32TimerAsync>,
     timeout: Duration,
-) -> Result<Option<crate::ndef::Record>, Error<I::Error>>
+) -> Result<Option<Vec<u8>>, Error<I::Error>>
 where
     I: pn532::Interface,
 {
@@ -83,19 +78,26 @@ where
     }
     // read data for message
     let message_size_or_marker = page34[4 + 1];
-    let mut buf_size: usize = if message_size_or_marker == 0xff {
-        page34[4+2] as usize *256 +  page34[4+3] as usize  + 5 /* for long TLV  */
+    let buf_size: usize = if message_size_or_marker == 0xff {
+        page34[4+2] as usize *256 +  page34[4+3] as usize // long TLV
     } else {
-        message_size_or_marker as usize + 3 /* for  short TLV */
+        message_size_or_marker as usize // ?? + 3 // short TLV
     };
-    buf_size =  (buf_size+3) &!3; // align to 4 bytes (for the padding in the ndef)
+    if buf_size > 2048 {
+        // prevent tag data crashing
+        return Err(Error::NdefSizeError(buf_size));
+    }
     let mut buf_vec = alloc::vec![0u8;buf_size];
+    let mut page5_pos_in_buf_vec = 0;
+    let mut bytes_to_read = buf_size;
+    if message_size_or_marker != 0xff { // short TLV - first two bytes are the two last in page 4 already read
+        buf_vec[0..=1].copy_from_slice(&page34[4+2..=4+3]);
+        page5_pos_in_buf_vec = 2;
+        bytes_to_read = buf_size - 2;
+    }
     let buf: &mut [u8] = &mut buf_vec;
-    crate::pn532_ext::process_ntag_read_long(pn532, buf, 4, buf_size, timeout)
+    crate::pn532_ext::process_ntag_read_long(pn532, &mut buf[page5_pos_in_buf_vec..], 5, bytes_to_read, timeout)
         .await?;
 
-    match crate::ndef::NDEFStructure::from_bytes((buf, 0)) {
-        Err(e) => Err(Error::NdefReadError(e)),
-        Ok(ndef) => Ok(Some(ndef.1.record)),
-    }
+    Ok(Some(buf_vec))
 }
