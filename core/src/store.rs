@@ -270,6 +270,8 @@ impl Store {
                         consumed_since_add: current_record.consumed_since_add,
                         consumed_since_weight: current_record.consumed_since_weight,
                         ext_has_k: k_info.is_some(),
+                        data_origin: current_record.data_origin.clone(),
+                        tag_type: current_record.tag_type.clone(),
                     }
                 } else {
                     return Err(StoreError::NotFound { id: spool_record.id.clone() });

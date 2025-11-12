@@ -134,6 +134,7 @@ hashbrown = { version = "0.15.0", features = ["serde"] }
 serde = { version = "1.0.213", default-features = false, features = [ "derive", "alloc", ] }
 serde_json = { version = "1.0.132", default-features = false, features = [ "alloc", ] }
 serde-csv-core = "0.3.2"
+serde_with = { version = "3.16.0", default-features = false, features = ["alloc", "macros", "base64", "hashbrown_0_15", "hex"]}
 pasetors = { version = "0.7.0", default-features = false, features = ["v4"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 getrandom = { version = "0.2.15", features = ["custom"] }

@@ -44,11 +44,12 @@ use crate::bambu::{Filament, KExtruder, KInfo, KNozzleDiameter, KNozzleId, KPrin
 use crate::color_utils::get_color_name;
 use crate::filament_staging::StagingOrigin;
 use crate::settings::OTA_TOML_FILENAME;
-use crate::spool_record::{FullSpoolRecord, SpoolRecord, SpoolRecordExt};
+use crate::spool_record::{FullSpoolRecord, OriginData, SpoolRecord, SpoolRecordExt};
 use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
 use crate::ssdp::{ssdp_task, SSDPPubSubChannel};
 use crate::store::{store_safe_time_now, Store, StoreObserver};
 
+use crate::tag_standards::{BAMBULAB_TAG_TYPE, BambuLabTag};
 use crate::types::FilamentSupInfo;
 // use crate::web_app::EncodeInfoDTO;
 use crate::{
@@ -285,9 +286,10 @@ impl ViewModel {
                 .ok();
         }
         let moved_view_model = self.view_model.clone().unwrap();
-        ui_app_backend.on_link_tag_to_spool_id(move |tag_id, spool_id, final_step| {
+        ui_app_backend.on_link_tag_to_spool_id(move |tag_id, tag_type, spool_id, final_step| {
             let _ = moved_view_model.borrow().dispatch_async_task(AppAsyncTaskRequest::LinkTagToSpool {
                 tag_id: tag_id.into(),
+                tag_type: tag_type.into(),
                 spool_id: spool_id.into(),
                 final_step,
             });
@@ -554,6 +556,16 @@ impl ViewModel {
         self.ui_weak
             .unwrap()
             .global::<crate::app::AppBackend>()
+            .on_get_spool_tag_definition_display(move |tag_definition_type, tag_definition_info, empty_spool_weight| {
+                moved_view_model
+                    .borrow()
+                    .ui_get_spool_tag_definition_display(&tag_definition_type, &tag_definition_info, empty_spool_weight)
+            });
+
+        let moved_view_model = self.view_model.as_ref().unwrap().clone();
+        self.ui_weak
+            .unwrap()
+            .global::<crate::app::AppBackend>()
             .on_get_slot_display(move |tray_id| moved_view_model.borrow().ui_get_slot_display(tray_id));
 
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
@@ -571,6 +583,13 @@ impl ViewModel {
                     .borrow()
                     .ui_add_v1_tag_to_inventory(tag_id.as_str(), tag.as_str(), final_step)
             });
+
+        let moved_view_model = self.view_model.clone().unwrap();
+        ui_app_backend.on_import_definition_tag_to_inventory(move |tag_definition_type, tag_definition_info, empty_spool_weight| {
+            moved_view_model
+                .borrow()
+                .ui_import_definition_tag_to_inventory(tag_definition_type.as_str(), tag_definition_info.as_str(), empty_spool_weight)
+        });
 
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
         self.ui_weak
@@ -961,6 +980,14 @@ impl ViewModel {
         });
     }
 
+    fn ui_import_definition_tag_to_inventory(&self, tag_definition_type: &str, tag_definition_info: &str, empty_spool_weight: i32) {
+        let _ = self.dispatch_async_task(AppAsyncTaskRequest::ImportDefinitionTagToInventory {
+            tag_definition_type: tag_definition_type.to_string(),
+            tag_definition_info: tag_definition_info.to_string(),
+            empty_spool_weight,
+        });
+    }
+
     fn ui_can_link_spool_to_tag(&self, id: &str) -> SharedString {
         if let Some(spool_rec) = self.store.get_spool_by_id(id) {
             if spool_rec.tag_id.is_empty() || spool_rec.tag_id.starts_with("-") {
@@ -1043,6 +1070,70 @@ impl ViewModel {
         }
     }
 
+    fn ui_get_spool_tag_definition_display(&self, tag_definition_type: &str, tag_definition_info: &str, empty_spool_weight: i32) -> UiSpoolRecordDisplay {
+        match tag_definition_type {
+            BAMBULAB_TAG_TYPE => {
+                if let Ok(bambu_tag) = serde_json::from_str::<BambuLabTag>(tag_definition_info) {
+                    let mut spool_rec = bambu_tag.to_spool_rec();
+                    if empty_spool_weight != 0 {
+                        spool_rec.weight_core = Some(empty_spool_weight);
+                    }
+
+                    let record = UiSpoolRecord {
+                        brand: spool_rec.brand.into(),
+                        color_code: spool_rec.color_code.into(),
+                        color_name: spool_rec.color_name.into(),
+                        material_type: spool_rec.material_type.into(),
+                        material_subtype: spool_rec.material_subtype.into(),
+                        slicer_filament: spool_rec.slicer_filament.into(),
+                        weight_advertised: spool_rec.weight_advertised.unwrap_or_default(),
+                        weight_core: spool_rec.weight_core.unwrap_or_default(),
+                        ..
+                        Default::default()
+                    };
+                    
+                    let (slicer_filament_name, temp_min, temp_max) = if let Some(filament_info) = &self.get_filament_info(&record.slicer_filament, None) {
+                        (
+                            slint::format!(
+                                "{}{}",
+                                filament_info.slicer_name,
+                                if filament_info.base_filament { " (base)" } else { "" }
+                            ),
+                            filament_info.nozzle_temp_low,
+                            filament_info.nozzle_temp_high,
+                        )
+                    } else {
+                        Default::default()
+                    };
+
+                    let color = if record.color_code.len() >= 6 {
+                        let color = u32::from_str_radix(&record.color_code[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+                        slint::Color::from_argb_encoded(color)
+                    } else {
+                        slint::Color::default()
+                    };
+
+                    UiSpoolRecordDisplay {
+                        slicer_filament_name,
+                        spool_record: record,
+                        temp_min,
+                        temp_max,
+                        color,
+                        ..
+                        Default::default()
+                    }
+                } else {
+                    error!("Internal Error, failed to parse definition info");
+                    UiSpoolRecordDisplay::default()
+                }
+            }
+            _ => {
+                error!("Internal Error, unexpected tag definition type");
+                UiSpoolRecordDisplay::default()
+            }
+        }
+    }
+
     fn ui_get_spool_record_display(&self, ui_spool_id: &SharedString) -> UiSpoolRecordDisplay {
         if ui_spool_id.is_empty() {
             return UiSpoolRecordDisplay::default();
@@ -1063,8 +1154,8 @@ impl ViewModel {
             // encode_time: todo!(),
             ext_has_k: spool_rec.ext_has_k,
             id: spool_rec.id.into(),
-            material_subtype: spool_rec.material_type.into(),
-            material_type: spool_rec.material_subtype.into(),
+            material_type: spool_rec.material_type.into(),
+            material_subtype: spool_rec.material_subtype.into(),
             note: spool_rec.note.into(),
             slicer_filament: spool_rec.slicer_filament.into(),
             tag_id: spool_rec.tag_id.into(),
@@ -1534,7 +1625,7 @@ impl ViewModel {
         }
     }
 
-    pub async fn process_v1_tag_read_async(view_model: Rc<RefCell<ViewModel>>, tag_id: String, tag: String, final_step: bool) {
+    pub async fn process_v1_tag_read_async(view_model: Rc<RefCell<ViewModel>>, tag_id_hex: String, tag: String, final_step: bool) {
         debug!("Received to process async read tag {tag}");
 
         // TODO: Can there be here a flow that doesn't need to store a new tag?????
@@ -1547,7 +1638,7 @@ impl ViewModel {
             // Tag with this tag_id is not in store  - for upgrading from non inventory release to inventory release
             // Tag with this tag_id is in store, but w/o K there, and the tag has K - for upgrading from old tags with K to new K approach
             // if let Some(mut tag_info) = tag_info_clone {
-            let tag_id = match hex::decode(&tag_id) {
+            let tag_id = match hex::decode(&tag_id_hex) {
                 Ok(tag_id) => tag_id,
                 Err(err) => {
                     let ui = view_model.borrow().ui_weak.unwrap();
@@ -1595,8 +1686,9 @@ impl ViewModel {
                     new_spool_rec.tag_id = hex::encode_upper(tag_id); // replace the tag_id with the real tag uid
                     new_spool_rec.ext_has_k = tag_k_info.is_some();
                     let new_spool_rec_ext = SpoolRecordExt {
-                        tag: Some(tag),
+                        tag: Some(tag.clone()),
                         k_info: tag_k_info,
+                        origin_data: Some(OriginData::SpoolEaseV1 { uid: tag_id_hex, url: tag })
                     };
                     match store.add_spool(new_spool_rec.clone(), new_spool_rec_ext.clone()).await {
                         Ok(new_spool_rec_id) => (Ok(()), new_spool_rec_id, Some(new_spool_rec_ext)),
@@ -1669,10 +1761,53 @@ impl ViewModel {
         }
     }
 
-    async fn link_tag_to_spool_id_async(view_model: Rc<RefCell<ViewModel>>, tag_id: String, spool_id: String, final_step: bool) {
+    async fn import_definition_tag_to_inventory_async(view_model: Rc<RefCell<ViewModel>>, tag_definition_type: String, tag_definition_info: String, empty_spool_weight: i32) {
+        match tag_definition_type.as_str() {
+            BAMBULAB_TAG_TYPE => {
+                if let Ok(bambulab_tag) = serde_json::from_str::<BambuLabTag>(&tag_definition_info) {
+                    let mut new_spool_rec = bambulab_tag.to_spool_rec();
+                    if empty_spool_weight != 0 {
+                        new_spool_rec.weight_core = Some(empty_spool_weight);
+                    }
+                    let new_spool_rec_ext = SpoolRecordExt { tag: None, k_info: None, origin_data: Some(OriginData::BambuLabTag { bambulab_tag } )};
+
+                    let store = view_model.borrow().store.clone();
+                    let ui = view_model.borrow().ui_weak.unwrap();
+                    let ui_app_state = ui.global::<crate::app::AppState>();
+                    match store.add_spool(new_spool_rec, new_spool_rec_ext).await {
+                        Ok(new_spool_rec_id) => {
+                            info!("Added new Bambulab Spool record number {new_spool_rec_id}");
+                            view_model.borrow_mut().recently_added_spool_id = Some(new_spool_rec_id.clone());
+                            ui_app_state.invoke_import_definition_tag_to_inventory_status("".into(), new_spool_rec_id.into());
+                            // TODO: ? Display spool number on screen or in the next page
+                        }
+                        Err(err) => {
+                            // TODO: display error on screen
+                            error!("Failed to add bambulab spool record {err:?}");
+                            ui_app_state.invoke_show_message_box(
+                                "Critical Store Notice".into(),
+                                "Failed to store information from tag".into(),
+                                err.to_shared_string(),
+                                crate::app::StatusType::Error,
+                                -1,
+                            );
+                        }
+                    };
+                } else {
+                    error!("Internal Error, tag_definition_info doen't match");
+                }
+            }
+            _ => {
+                error!("Internal Error, unexpected tag definition type");
+            }
+        }
+    }
+
+    async fn link_tag_to_spool_id_async(view_model: Rc<RefCell<ViewModel>>, tag_id: String, tag_type: String, spool_id: String, final_step: bool) {
         let store = view_model.borrow().store.clone();
         if let Some(mut spool_rec) = store.get_spool_by_id(&spool_id) {
             spool_rec.tag_id = tag_id.clone();
+            spool_rec.tag_type = tag_type.clone();
             let store_res = store.update_spool(spool_rec.clone(), None).await;
             let ui = view_model.borrow().ui_weak.unwrap();
             let ui_app_state = ui.global::<crate::app::AppState>();
@@ -1705,6 +1840,7 @@ impl ViewModel {
         let store = view_model.borrow().store.clone();
         if let Some(mut spool_rec) = store.get_spool_by_id(&spool_id) {
             let unlinked_tag_id = core::mem::take(&mut spool_rec.tag_id);
+            spool_rec.tag_type = "".to_string();
             spool_rec.encode_time = None;
             let store_res = store.update_spool(spool_rec.clone(), None).await;
             let ui = view_model.borrow().ui_weak.unwrap();
@@ -2309,6 +2445,23 @@ impl SpoolTagObserver for ViewModel {
                         let ui = self.ui_weak.unwrap();
                         let ui_app_state = ui.global::<crate::app::AppState>();
                         ui_app_state.invoke_new_tag_scanned(hex_tag.to_shared_string());
+                    }
+                }
+                spool_tag::ReadResult::BambulabTag { uid, data } => {
+                    let hex_tag = hex::encode_upper(uid);
+                    if let Some(spool_rec) = self.store.get_spool_by_hex_tag(&hex_tag) {
+                        self.filament_staging.borrow_mut().set_spool_record(spool_rec, StagingOrigin::Scanned);
+                        self.display_filament_staging(true);
+                        let _ = self.dispatch_async_task(AppAsyncTaskRequest::SetStagingRecExt {});
+                    } else if let Some(blocks) = data {
+                        let bambu_tag = BambuLabTag::new(&hex_tag, blocks);
+                        let bamtu_tag_str = serde_json::to_string(&bambu_tag).unwrap();
+                        let ui = self.ui_weak.clone();
+                        ui.unwrap().global::<crate::app::AppState>().invoke_new_definition_tag_scanned(
+                            BAMBULAB_TAG_TYPE.to_shared_string(),
+                            hex_tag.into(),
+                            bamtu_tag_str.into(),
+                        );
                     }
                 }
             },
@@ -2916,6 +3069,7 @@ enum AppAsyncTaskRequest {
     },
     LinkTagToSpool {
         tag_id: String,
+        tag_type: String,
         spool_id: String,
         final_step: bool,
     },
@@ -2936,6 +3090,11 @@ enum AppAsyncTaskRequest {
     ConfigureSlotWithSpool {
         slot_id: i32,
         spool_id: String,
+    },
+    ImportDefinitionTagToInventory {
+        tag_definition_type: String,
+        tag_definition_info: String,
+        empty_spool_weight: i32,
     },
 }
 
@@ -2962,9 +3121,10 @@ pub async fn app_async_task(view_model: Rc<RefCell<ViewModel>>) {
             }
             AppAsyncTaskRequest::LinkTagToSpool {
                 tag_id,
+                tag_type,
                 spool_id,
                 final_step,
-            } => ViewModel::link_tag_to_spool_id_async(view_model.clone(), tag_id, spool_id, final_step).await,
+            } => ViewModel::link_tag_to_spool_id_async(view_model.clone(), tag_id, tag_type, spool_id, final_step).await,
             AppAsyncTaskRequest::UnLinkSpoolFromTag { spool_id } => ViewModel::unlink_spool_from_tag_async(view_model.clone(), spool_id).await,
             AppAsyncTaskRequest::SetStagingRecExt {} => ViewModel::set_staging_rec_ext_async(view_model.clone()).await,
             AppAsyncTaskRequest::SetSpoolWeight {
@@ -2978,6 +3138,11 @@ pub async fn app_async_task(view_model: Rc<RefCell<ViewModel>>) {
             AppAsyncTaskRequest::ConfigureSlotWithSpool { slot_id, spool_id } => {
                 ViewModel::configure_slot_with_spool_async(view_model.clone(), slot_id, spool_id).await
             }
+            AppAsyncTaskRequest::ImportDefinitionTagToInventory {
+                tag_definition_type,
+                tag_definition_info,
+                empty_spool_weight,
+            } => ViewModel::import_definition_tag_to_inventory_async(view_model.clone(), tag_definition_type, tag_definition_info, empty_spool_weight).await,
         }
     }
 }

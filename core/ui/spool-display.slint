@@ -30,6 +30,7 @@ export component SpoolDisplay inherits Rectangle {
     background: white;
     property <color> filament-color: spool-display.color;
     in property <bool> show-title: true;
+    in property <string> title: "";
 
     VerticalLayout {
         alignment: stretch;
@@ -37,7 +38,7 @@ export component SpoolDisplay inherits Rectangle {
             vertical-stretch: 0;
             background: spool-display.color;
             text-color: Utils.contrasting_color(self.background);
-            text: "Spool \{spool-display.spool-record.id} Information";
+            text: title == "" ? "Spool \{spool-display.spool-record.id} Information" : title;
         }
 
         VerticalLayout {
@@ -46,7 +47,7 @@ export component SpoolDisplay inherits Rectangle {
             padding: 10px;
             padding-bottom: 5px;
             property <string> brand: spool-display.spool-record.brand == "" ? "" : "\{spool-display.spool-record.brand} ";
-            property <string> material-subtype: spool-display.spool-record.material-subtype == "" ? "" : "\{spool-display.spool-record.material_subtype}";
+            property <string> material-subtype: spool-display.spool-record.material-subtype == "" ? "" : " \{spool-display.spool-record.material_subtype}";
             property <string> color-name: spool-display.spool-record.color-name == "" ? "" : " \{spool-display.spool-record.color-name}";
             MyText {
                 vertical-stretch: 1;

@@ -1,11 +1,9 @@
 use crate::{
-    bambu::{KInfo, KNozzleId},
-    csvdb::CsvDbId,
-    types::FilamentSupInfo,
+    bambu::{KInfo, KNozzleId}, csvdb::CsvDbId, tag_standards::BambuLabTag, types::FilamentSupInfo
 };
 use alloc::{
     format,
-    string::{String, ToString},
+    string::{String, ToString}
 };
 use serde::{Deserialize, Serialize};
 use shared::utils::{
@@ -52,6 +50,11 @@ pub struct SpoolRecord {
     pub consumed_since_weight: f32,
     #[serde(default, serialize_with = "serialize_bool_yn", deserialize_with = "deserialize_bool_yn_empty_n")]
     pub ext_has_k: bool,
+    #[serde(default)]
+    pub data_origin: String,
+    #[serde(default)]
+    pub tag_type: String,
+    // !!! Don't Forget to set default for any field!
     // pub update_time
     // pub update_tag_fields_time
     // #[serde(default,deserialize_with = "deserialize_optional_unit")]
@@ -74,12 +77,20 @@ pub struct SpoolRecord {
     // pub last_used: Option<()>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum OriginData {
+    SpoolEaseV1 { uid: String, url: String},
+    BambuLabTag { bambulab_tag: BambuLabTag },
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SpoolRecordExt {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub k_info: Option<KInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin_data: Option<OriginData>,
 }
 
 impl SpoolRecordExt {

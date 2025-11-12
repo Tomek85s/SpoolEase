@@ -5,6 +5,7 @@
 pub mod bambu_print;
 
 use crate::spool_record::{FullSpoolRecord, SpoolRecord};
+use crate::tag_standards::SPOOLEASE_V1_TAG_TYPE;
 use crate::view_model::{self, StoreStateRequestChannel};
 use crate::{
     app_config::{PrinterConfig, MATERIALS},
@@ -2862,6 +2863,8 @@ impl TagInformationV1 {
             consumed_since_add: 0.0,
             consumed_since_weight: 0.0,
             ext_has_k: false, // this means if in the store, so need to be set to true when saving store
+            data_origin: SPOOLEASE_V1_TAG_TYPE.to_string(),
+            tag_type:"".to_string(),
         }
     }
 }

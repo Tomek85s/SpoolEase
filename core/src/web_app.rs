@@ -323,6 +323,8 @@ impl AppWithStateBuilder for NestedAppBuilder {
                         consumed_since_add: 0.0,
                         consumed_since_weight: 0.0,
                         ext_has_k: add_spool.k_info.is_some(),
+                        data_origin: String::new(),
+                        tag_type: String::new(),
                     };
                     if new_spool.id.is_empty() {
                         match store
@@ -331,6 +333,7 @@ impl AppWithStateBuilder for NestedAppBuilder {
                                 SpoolRecordExt {
                                     tag: None,
                                     k_info: add_spool.k_info,
+                                    origin_data: None,
                                 },
                             )
                             .await

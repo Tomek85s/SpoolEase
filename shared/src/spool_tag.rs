@@ -12,10 +12,14 @@ use embassy_time::{Duration, Instant, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 
 use framework::prelude::*;
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, hex::Hex};
 
 use crate::{
-    ndef, nfc::{self, NfcTagType, get_nfc_tag_type}, pn532_ext::{self}
+    ndef,
+    nfc::{self, get_nfc_tag_type, NfcTagType},
+    pn532_ext,
 };
 
 pub const TAG_PLACEHOLDER: &str = "$tag-id$";
@@ -125,9 +129,21 @@ pub enum Failure {
     TagReadFailure,
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ReadResult {
-    NDEF { uid: Vec<u8>, message: Option<Vec<u8>> }
+    NDEF {
+        #[serde_as(as = "Hex")]
+        uid: Vec<u8>,
+        #[serde_as(as = "Option<Hex>")]
+        message: Option<Vec<u8>>,
+    },
+    BambulabTag {
+        #[serde_as(as = "Hex")]
+        uid: Vec<u8>,
+        #[serde_as(as = "Option<hashbrown::HashMap<_, Hex>>")]
+        data: Option<HashMap<i32, Vec<u8>>>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -357,7 +373,7 @@ async fn nfc_task(
                 },
             }
         } else {
-            debug!("Waiting for Tag");
+            // debug!("Waiting for Tag");
             let res = select(
                 tag_operation.wait(),
                 pn532.process(
@@ -380,7 +396,7 @@ async fn nfc_task(
                 // This section is to avoid borrow checker issues, creating a res that does not require keeping borrowed PN532
                 Either::Second(s) => match s {
                     Ok(response) => {
-                        debug!("Full inlist response: {response:x?}");
+                        // debug!("Full inlist response: {response:x?}");
                         let number_of_tags_found = response[0];
                         if number_of_tags_found == 0 {
                             // no tag found, shouldn't occure
@@ -397,9 +413,10 @@ async fn nfc_task(
                         if nfc_tag_type == NfcTagType::Unknown {
                             error!("Unknown tag type, this tag can't be used");
                             continue;
-                        } else {
-                            debug!("Scanned tag type is: {nfc_tag_type:?}");
                         }
+                        // else {
+                        //     debug!("Scanned tag type is: {nfc_tag_type:?}");
+                        // }
                         let uid_len = response[5] as usize;
                         if uid_len < 4 || 6 + uid_len > response.len() {
                             error!("Error with tag response, uid_len doesn't seem right {uid_len}");
@@ -415,7 +432,7 @@ async fn nfc_task(
             // Now the real work
             match tag_res {
                 Ok(uid) => {
-                    debug!("Found Tag with uid : {:x?}", uid.uid());
+                    // debug!("Found Tag with uid : {:x?}", uid.uid());
                     last_seen_tag = Some(uid);
                     // last_seen_tag_time = Instant::now();
                     if in_switch_operation {
@@ -423,14 +440,17 @@ async fn nfc_task(
                             && previous_operation_tag_last_seen_time.elapsed().as_millis() < 500
                         {
                             previous_operation_tag_last_seen_time = Instant::now();
-                            debug!("Same as previously acted upon tag, ignoring");
+                            // debug!("Same as previously acted upon tag, ignoring");
                             continue;
                         } else {
+                            debug!(
+                                "Scanned a new {nfc_tag_type:?} Tag with uid : {:x?}",
+                                uid.uid()
+                            );
                             in_switch_operation = false;
                             previous_operation_tag = None;
                         }
                     }
-
                     match &curr_operation_with_tag.as_ref() {
                         Some(TagOperation::WriteTag(write_tag_reuest)) => {
                             debug!("Performing write tag operation");
@@ -496,50 +516,117 @@ async fn nfc_task(
                             spool_tag_rc
                                 .borrow()
                                 .notify_tag_status(Status::FoundTagNowReading);
-
-                            let res = if nfc_tag_type== NfcTagType::NTAG {
-                                match crate::nfc::read_ndef_payload(
+                            let mut final_read_result = None;
+                            if nfc_tag_type == NfcTagType::NTAG {
+                                let ntag_res = match crate::nfc::read_ndef_payload(
                                     &mut pn532,
                                     Duration::from_millis(2000),
                                 )
-                                .await {
+                                .await
+                                {
                                     Ok(v) => Ok(v),
                                     Err(nfc::Error::NotNdefFormatted) => Ok(None),
-                                    Err(e) => Err(e)
-                                }
-                            } else {
-                                Ok(None)
-                            };
-                            match res
-                            {
-                                // TODO: combine
-                                Ok(read_ndef_message_payload) => {
-                                    if let Some(payload) = &read_ndef_message_payload {
-                                        debug!("Read NDEF message size {}", payload.len());
-                                    } else {
-                                        debug!("No NDEF message in tag");
-                                    }
-                                    spool_tag_rc.borrow().notify_tag_status(Status::ReadSuccess(
-                                        ReadResult::NDEF {
+                                    Err(e) => Err(e),
+                                };
+                                match ntag_res {
+                                    // TODO: combine
+                                    Ok(read_ndef_message_payload) => {
+                                        if let Some(payload) = &read_ndef_message_payload {
+                                            debug!("Read NDEF message size {}", payload.len());
+                                        } else {
+                                            debug!("No NDEF message in tag");
+                                        }
+                                        final_read_result = Some(ReadResult::NDEF {
                                             uid: uid.uid().to_vec(),
-                                            message: read_ndef_message_payload,
-                                        },
-                                    ));
-                                    curr_operation_with_tag =
-                                        Some(TagOperation::ReadTag(ReadTagRequest {}));
-                                    previous_operation_tag_last_seen_time = Instant::now();
-                                    previous_operation_tag = last_seen_tag;
-                                    in_switch_operation = true;
+                                            message: read_ndef_message_payload, // could be None if no NDEF found
+                                        });
+                                    }
+                                    Err(e) => {
+                                        error!("Error reading tag {:?}", e);
+                                        spool_tag_rc.borrow().notify_tag_status(Status::Failure(
+                                            Failure::TagReadFailure,
+                                        ));
+                                    }
                                 }
-                                Err(e) => {
-                                    error!("Error reading tag {:?}", e);
-                                    spool_tag_rc.borrow().notify_tag_status(Status::Failure(
-                                        Failure::TagReadFailure,
-                                    ));
+                            } else if nfc_tag_type == NfcTagType::MifareClassic1K {
+                                // try as Bambulab
+                                match crate::nfc::read_bambulab_payload(
+                                    &mut pn532,
+                                    Duration::from_millis(2000),
+                                    uid.uid(),
+                                )
+                                .await
+                                {
+                                    Ok(bambulab_payload) => {
+                                        info!(
+                                            "Scanned and read a Bambu Lab Spool Tag with UID {:X?}",
+                                            uid.uid()
+                                        );
+                                        fn display_hex_ascii(data: &HashMap<i32, Vec<u8>>) {
+                                            for (block_num, chunk) in data.iter() {
+                                                let mut line = alloc::format!("[{block_num:2}]");
+                                                for &b in chunk {
+                                                    let item = // if b.is_ascii_graphic() || b == b' '
+                                                    // {
+                                                    //     &alloc::format!(" {} ", b as char)
+                                                    // } else {
+                                                        &alloc::format!("{b:02X} ");
+                                                    // };
+                                                    line.push_str(item);
+                                                }
+                                                debug!("{}", line);
+                                            }
+                                        }
+                                        display_hex_ascii(&bambulab_payload);
+                                        final_read_result = Some(ReadResult::BambulabTag {
+                                            uid: uid.uid().to_vec(),
+                                            data: Some(bambulab_payload), // could be None if no NDEF found
+                                        });
+                                    }
+                                    Err(err) => match err {
+                                        nfc::Error::NotBambulabTag => {
+                                            // not Bambulab use for now only UID
+                                            // TODO: In the future, handle NDEF on Mifare
+                                            final_read_result = Some(ReadResult::NDEF {
+                                                uid: uid.uid().to_vec(),
+                                                message: None,
+                                            })
+                                        }
+                                        _ => {
+                                            error!("Error reading tag {:?}", err);
+                                            spool_tag_rc.borrow().notify_tag_status(
+                                                Status::Failure(Failure::TagReadFailure),
+                                            );
+                                        }
+                                    },
                                 }
+                            } else if nfc_tag_type == NfcTagType::MifareClassic4K {
+                                // not Bambulab use for now only UID
+                                // TODO: In the future, handle NDEF on Mifare
+                                final_read_result = Some(ReadResult::NDEF {
+                                    uid: uid.uid().to_vec(),
+                                    message: None,
+                                })
+                            } else {
+                                error!("Unknown tag type scanned with tag_res: {tag_res:x?}, not supported, please report on GitHub/Discord");
+                            };
+
+                            if let Some(final_read_result) = final_read_result {
+                                // there is a result to return
+                                spool_tag_rc
+                                    .borrow()
+                                    .notify_tag_status(Status::ReadSuccess(final_read_result));
+                                curr_operation_with_tag =
+                                    Some(TagOperation::ReadTag(ReadTagRequest {}));
+                                previous_operation_tag_last_seen_time = Instant::now();
+                                previous_operation_tag = last_seen_tag;
+                                in_switch_operation = true;
                             }
                         }
-                        Some(TagOperation::EraseTag { check_uid, cookie: _ }) => {
+                        Some(TagOperation::EraseTag {
+                            check_uid,
+                            cookie: _,
+                        }) => {
                             debug!("Performing erase tag operation");
                             spool_tag_rc
                                 .borrow()
@@ -555,9 +642,7 @@ async fn nfc_task(
                                     continue;
                                 }
                             }
-                            match nfc::erase_ndef_tag(&mut pn532, Duration::from_secs(2))
-                                .await
-                            {
+                            match nfc::erase_ndef_tag(&mut pn532, Duration::from_secs(2)).await {
                                 Ok(()) => {
                                     spool_tag_rc
                                         .borrow()

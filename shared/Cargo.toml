@@ -19,13 +19,14 @@ radium = { git = "https://github.com/arctic-alpaca/ferrilab" }
 [dependencies]
 serde = { version = "1.0.213", default-features = false, features = [ "derive", "alloc", ] }
 serde_json = { version = "1.0.132", default-features = false, features = [ "alloc", ] }
+serde_with = { version = "3.16.0", default-features = false, features = ["alloc", "macros", "base64", "hashbrown_0_15", "hex"]}
 
 
 framework = { package = "esp-hal-app-framework", git = "https://github.com/yanshay/esp-hal-app/", tag="0.5.0", features = ["esp32s3"] }
 # framework = { package = "esp-hal-app-framework", path = "../../../esp-hal-app/esp-hal-app-framework/", features = ["esp32s3"] }
 deku = { version = "0.17.0", default-features = false, features = ["alloc"] }
-pn532 = { git = "https://github.com/yanshay/pn532", branch ="yanshay_async_full", default-features = false }
-# pn532 = { path = "../../../../../OpenSourceProj/forked/pn532/", default-features = false }
+# pn532 = { git = "https://github.com/yanshay/pn532", branch ="yanshay_async_full", default-features = false }
+pn532 = { path = "../../../../../../OpenSourceProj/forked/pn532/", default-features = false }
 embassy-time = { version = "0.4.0", features = ["generic-queue-8"] }
 embassy-net = { version = "0.6.0", features = ["raw", "tcp", "udp", "dhcpv4", "medium-ethernet", "multicast" ] }
 esp-hal = { version = "0.23.1" }
@@ -53,6 +54,10 @@ serde-csv-core = "0.3.2"
 
 # ndef-rs = { path = "../../../../../../OpenSourceProj/forked/ndef-rs/ndef", default-features = false}
 ndef-rs = { git = "https://github.com/yanshay/ndef-rs" , branch = "yanshay_no_std", default-features = false}
+
+# crypo for bambu/mifare
+sha2 = { version = "0.10.8", default-features = false}
+hmac = { version = "0.12.1", default-features = false}
 
 [features]
 default = ["esp32s3"]

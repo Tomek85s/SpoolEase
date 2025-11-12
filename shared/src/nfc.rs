@@ -1,8 +1,14 @@
 use alloc::vec::Vec;
-use embassy_time::Duration;
-use ndef_rs::{NdefMessage, NdefRecord, TNF, error::NdefError, payload::UriPayload, tag::{NFT2Tag, TlvValue}};
+use embassy_time::{Duration, Instant};
+use hashbrown::HashMap;
+use ndef_rs::{
+    error::NdefError,
+    payload::UriPayload,
+    tag::{NFT2Tag, TlvValue},
+    NdefMessage, NdefRecord, TNF,
+};
 
-use crate::pn532_ext::{Esp32TimerAsync, ensure_tag_formatted, process_ntag_write_long};
+use crate::pn532_ext::{self, ensure_tag_formatted, process_ntag_write_long, Esp32TimerAsync};
 
 #[derive(Debug)]
 pub enum Error<E: core::fmt::Debug> {
@@ -12,6 +18,8 @@ pub enum Error<E: core::fmt::Debug> {
     NdefSizeError(usize),
     NdefError(NdefError),
     NdefBuildError,
+    NotBambulabTag,
+    MifareIncompleteBlock(u8),
 }
 
 impl<E: core::fmt::Debug> From<crate::pn532_ext::Error<E>> for Error<E> {
@@ -41,10 +49,18 @@ pub async fn write_ndef_url_record<I>(
 where
     I: pn532::Interface,
 {
-    let ndef_record = NdefRecord::builder().tnf(TNF::WellKnown).payload(&UriPayload::from_string(url)).build().map_err(|_e| Error::NdefBuildError)?;
+    let ndef_record = NdefRecord::builder()
+        .tnf(TNF::WellKnown)
+        .payload(&UriPayload::from_string(url))
+        .build()
+        .map_err(|_e| Error::NdefBuildError)?;
     let message = NdefMessage::from(ndef_record);
     let tlv = TlvValue::ndef_message(&message).map_err(|_e| Error::NdefBuildError)?;
-    let tag = NFT2Tag::builder().size_in_bytes(512).add_tlv(tlv).add_tlv(TlvValue::terminator()).build();
+    let tag = NFT2Tag::builder()
+        .size_in_bytes(512)
+        .add_tlv(tlv)
+        .add_tlv(TlvValue::terminator())
+        .build();
     let tag_bytes = tag.to_bytes().map_err(|_e| Error::NdefBuildError)?;
     if tag_bytes.len() < 4 {
         return Err(Error::NdefBuildError);
@@ -54,6 +70,45 @@ where
     process_ntag_write_long(pn532, &tag_bytes[4..], 4, timeout).await?;
 
     Ok(())
+}
+
+pub async fn read_bambulab_payload<I>(
+    pn532: &mut pn532::Pn532<I, Esp32TimerAsync>,
+    timeout: Duration,
+    uid: &[u8],
+) -> Result<HashMap<i32, Vec<u8>>, Error<I::Error>>
+where
+    I: pn532::Interface,
+{
+    let end_time = Instant::now() + timeout;
+    let bambulab_keys = crate::pn532_ext::bambulab_keys(uid);
+    let mut currently_authenticated_sector = None;
+    let blocks_to_read = [1, 2, 4, 5, 6, 13, 16];
+    let mut res_map = HashMap::new();
+    for block_number in blocks_to_read {
+        let mut res_vec = alloc::vec![0u8;16];
+        match pn532_ext::mifare_read_with_retries(
+            pn532,
+            uid,
+            block_number,
+            &mut currently_authenticated_sector,
+            bambulab_keys.block_key(block_number),
+            &mut res_vec,
+            end_time,
+            &[],
+        )
+        .await {
+            Ok(bytes_read) => {
+                if bytes_read != 16 {
+                    return Err(Error::MifareIncompleteBlock(block_number))
+                }
+                res_map.insert(block_number as i32, res_vec);
+            }
+            Err(pn532_ext::Error::AuthenticationError) => { return Err(Error::NotBambulabTag); }
+            Err(err) => return Err(err.into())
+        }
+    }
+    Ok(res_map)
 }
 
 pub async fn read_ndef_payload<I>(
@@ -79,7 +134,7 @@ where
     // read data for message
     let message_size_or_marker = page34[4 + 1];
     let buf_size: usize = if message_size_or_marker == 0xff {
-        page34[4+2] as usize *256 +  page34[4+3] as usize // long TLV
+        page34[4 + 2] as usize * 256 + page34[4 + 3] as usize // long TLV
     } else {
         message_size_or_marker as usize // ?? + 3 // short TLV
     };
@@ -90,14 +145,21 @@ where
     let mut buf_vec = alloc::vec![0u8;buf_size];
     let mut page5_pos_in_buf_vec = 0;
     let mut bytes_to_read = buf_size;
-    if message_size_or_marker != 0xff { // short TLV - first two bytes are the two last in page 4 already read
-        buf_vec[0..=1].copy_from_slice(&page34[4+2..=4+3]);
+    if message_size_or_marker != 0xff {
+        // short TLV - first two bytes are the two last in page 4 already read
+        buf_vec[0..=1].copy_from_slice(&page34[4 + 2..=4 + 3]);
         page5_pos_in_buf_vec = 2;
         bytes_to_read = buf_size - 2;
     }
     let buf: &mut [u8] = &mut buf_vec;
-    crate::pn532_ext::process_ntag_read_long(pn532, &mut buf[page5_pos_in_buf_vec..], 5, bytes_to_read, timeout)
-        .await?;
+    crate::pn532_ext::process_ntag_read_long(
+        pn532,
+        &mut buf[page5_pos_in_buf_vec..],
+        5,
+        bytes_to_read,
+        timeout,
+    )
+    .await?;
 
     Ok(Some(buf_vec))
 }

@@ -141,11 +141,13 @@ export global AppBackend {
     callback calibrate-scale(weight: int);
     pure callback get-connected-scale-info() -> string;
     pure callback get-available-scales-info() -> [string];
-    callback link_tag_to_spool_id(tag_id: string, spool-id: string, final-step: bool);
+    callback import-definition-tag-to-inventory(tag-definition-type: string, tag-definition-info: string, empty-spool-weight: int);
+    callback link_tag_to_spool_id(tag_id: string, tag_type: string, spool-id: string, final-step: bool);
     callback unlink-spool-from-tag(spool-id: string);
     callback set-spool-weight(spool-id: string, weight_current: int, weight_new: int, final-step: bool);
     pure callback recently_added_spool_id_if_untagged() -> string;
     pure callback get-spool-record-display(spool-id: string) -> UiSpoolRecordDisplay;
+    pure callback get-spool-tag-definition-display(tag-definition-type: string, tag-definition-info: string, empty-spool-weight: int) -> UiSpoolRecordDisplay;
     pure callback get-slot-display(tray-id: int) -> UiSlotDisplay;
     callback can-link-spool-to-tag(id: string) -> string; // empty if untagged, error text if not
     callback add-v1-tag-to-inventory(tag_id: string, tag_descriptor: string, final-step: bool);
@@ -158,13 +160,20 @@ export global AppBackend {
     callback ota-update-firmware(product: string, train: string);
 }
 
+export enum NewScannedTagType {
+  SimpleTag,
+  DefinitionTag,
+}
+
 export enum NewTagScanPage {
     OperationSelect,
     SpoolSelect,
-    LinkSpoolDisplay,
+    SpoolDisplay,
     UpdateWeight,
     StatusDisplay,
     V1TagPrompt,
+    SpoolDefinitionTagScanned, // Bambulab etc.
+    BambulabSpoolTypeSelection,
 }
 
 export enum NewTagOperation {
@@ -231,13 +240,16 @@ export global AppState {
     in-out property <bool> some-printer-connected: false;
 
     // Global state variables for New Tag Scan Control-State
+    in-out property <NewScannedTagType> new-tag-scan-tag-type; // Simple or Definition
     in-out property <string> new-tag-scan-tag-id: "";
     in-out property <NewTagScanPage> new-tag-scan-page: OperationSelect;
     in-out property <string> new-tag-scan-status: ""; // text means error, empty mean ok
     in-out property <NewTagOperation> new-tag-operation: None;
     in-out property <string> new-tag-scan-spool-id: "";
-    in-out property <int> new-tag-scan-spool-id-int: 0;
-    in-out property <string> new-tag-scan-v1-tag: "";
+    in-out property <int> new-tag-scan-spool-id-int: 0; // used for when typing the id
+    in-out property <string> new-tag-scan-definition-info: ""; // The actual data (as understdoon by the view_model)
+    in-out property <string> new-tag-scan-definition-type: ""; // Bambu Lab, Creatlity, etc.
+    in-out property <int> new-tag-scan-empty-spool-weight: 0; // 0 - not specified, value from Bambu Tag
 
     in-out property <StagingOperationsPage> staging-operation-page: StagingOperationsPage.OperationSelection;
     in-out property <StagingOperationsPage> prev-staging-operation-page: StagingOperationsPage.OperationSelection;
@@ -601,21 +613,54 @@ export global AppState {
     // Rust callable functions for new-tag-scan flow
     public function new-tag-scanned(tag-id: string) {
         self.new-tag-scan-page = NewTagScanPage.OperationSelect;
+        self.new-tag-scan-tag-type = NewScannedTagType.SimpleTag;
         self.new-tag-operation = NewTagOperation.None;
         self.new-tag-scan-status = "";
         self.new-tag-scan-spool-id = "";
         self.new-tag-scan-spool-id-int = 0;
         self.new-tag-scan-tag-id = tag-id;
+        self.new-tag-scan-definition-info = "";
+        self.new-tag-scan-empty-spool-weight = 0;
         self.control-state = ControlState.NewTagScan;
     }
     public function new-v1-tag-scanned(tag-id: string, v1-tag: string) {
         self.new-tag-scan-page = NewTagScanPage.V1TagPrompt;
+        self.new-tag-scan-tag-type = NewScannedTagType.SimpleTag;
         self.new-tag-operation = NewTagOperation.None;
         self.new-tag-scan-status = "";
         self.new-tag-scan-spool-id = "";
         self.new-tag-scan-tag-id = tag-id;
-        self.new-tag-scan-v1-tag = v1-tag;
+        self.new-tag-scan-definition-info = v1-tag;
+        self.new-tag-scan-empty-spool-weight = 0;
         self.control-state = ControlState.NewTagScan;
+    }
+    public function new-definition-tag-scanned(definition-type: string, tag-id: string, definition-info: string) {
+        self.new-tag-scan-definition-type = definition-type; // Bambu Lab, OpenPrintTag, Creality, etc. - in the future can unite with V1-Tag
+        self.new-tag-scan-tag-type = NewScannedTagType.DefinitionTag;
+        self.new-tag-scan-page = NewTagScanPage.SpoolDefinitionTagScanned;
+        self.new-tag-operation = NewTagOperation.None;
+        self.new-tag-scan-status = "";
+        self.new-tag-scan-spool-id = "";
+        self.new-tag-scan-tag-id = tag-id;
+        self.new-tag-scan-definition-info = definition-info;
+        self.new-tag-scan-empty-spool-weight = 0;
+        self.control-state = ControlState.NewTagScan;
+    }
+
+    public function import-definition-tag-to-inventory-status(status: string, spool-id: string) {
+      // This one is called both from link_tag and from v1_tag add new tag flows
+      // string empty ok, content is error message
+
+      if self.control-state == ControlState.NewTagScan {
+            if status == "" {
+          // this will be effective only if there is a weight (this will be driven by the flow in the screen itself)
+                self.new-tag-scan-spool-id = spool-id;
+                self.new-tag-scan-page = NewTagScanPage.OperationSelect;
+            } else {
+                self.new-tag-scan-page = NewTagScanPage.StatusDisplay;
+                self.new-tag-scan-status = status;
+            }
+        }
     }
 
     public function link-tag-to-spool-id-status(status: string) {

@@ -25,6 +25,7 @@ mod web_app;
 mod spool_record;
 mod types;
 mod app_ota;
+mod tag_standards;
 
 use alloc::{format, rc::Rc, string::ToString};
 use shared::settings::OTA_TLS_CERTIFICATE;

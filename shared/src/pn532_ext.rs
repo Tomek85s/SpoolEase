@@ -1,6 +1,7 @@
 use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 use deku::DekuContainerWrite;
 use embassy_time::with_deadline;
 use embassy_time::Duration;
@@ -24,6 +25,7 @@ Error Codes List (the first byte): page 67, 7.1 Error Handling
 pub enum Error<E: core::fmt::Debug> {
     Pn532Error(pn532::Error<E>),
     Pn532ExtError(u8),
+    AuthenticationError,
 }
 
 impl<E: core::fmt::Debug> From<pn532::Error<E>> for Error<E> {
@@ -72,17 +74,17 @@ where
     I: pn532::Interface,
 {
     Timer::after_millis(10).await; // wait for stable RF field
-    let num_pages = (buf.len()+3) / 4; // complement to include partial data on last page
+    let num_pages = (buf.len() + 3) / 4; // complement to include partial data on last page
 
     let end_time = Instant::now() + timeout;
     let last_err;
 
     /*'single_write:*/
-    let mut data_to_write = [0u8;4];
+    let mut data_to_write = [0u8; 4];
     for page_offset in 0..num_pages {
         let page_byte_offset = page_offset * 4;
-        let n = min(4, buf.len()-page_byte_offset);
-        data_to_write[.. n].copy_from_slice(&buf[page_byte_offset..page_byte_offset+n]);
+        let n = min(4, buf.len() - page_byte_offset);
+        data_to_write[..n].copy_from_slice(&buf[page_byte_offset..page_byte_offset + n]);
         if n < 4 {
             data_to_write[n..].fill(0);
         }
@@ -169,24 +171,28 @@ where
                 end_time - Instant::now(),
             )
             .await?;
+
         if error_on_errnums.contains(&read_data[0]) {
+            // not retrying on these errors
             return Err(Error::Pn532ExtError(read_data[0]));
         }
+
         if read_data[0] != 0x00 {
             // first byte signals if read was ok
             last_err = read_data[0];
-            debug!(
+            warn!(
                 "Error {} during NFC read of 4 pages starting at {page}, retrying",
                 last_err
             );
             continue;
         }
-        let n = min(read_data.len()-1, buf.len());
+
+        let n = min(read_data.len() - 1, buf.len());
         buf[..n].copy_from_slice(&read_data[1..n + 1]); // skip the 0 (that represents error or ok) at the beginning
         if n < buf.len() {
             buf[n..].fill(0);
         }
-        return Ok(n)
+        return Ok(n);
     }
 }
 
@@ -549,4 +555,163 @@ fn get_data_to_set<'a>(
     send_buf[payload.len()..payload.len() + command.len()].copy_from_slice(command);
 
     &send_buf[..payload.len() + command.len()]
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn mifare_read_with_retries<I>(
+    pn532: &mut pn532::Pn532<I, Esp32TimerAsync>,
+    uid: &[u8],
+    block_number: u8,
+    currently_authenticated_sector: &mut Option<u8>,
+    key: &[u8; 6],
+    buf: &mut [u8],
+    end_time: Instant,
+    error_on_errnums: &[u8],
+) -> Result<usize, Error<I::Error>>
+where
+    I: pn532::Interface,
+{
+    let mut last_err;
+
+    let sector = block_number / 4;
+    let need_authenticate = Some(sector) != *currently_authenticated_sector;
+
+    if need_authenticate {
+        loop {
+            if Instant::now() > end_time {
+                error!("Tag read timeout error");
+                return Err(Error::Pn532Error(pn532::Error::TimeoutResponse)); // using the Pn532Error, not sure if good practice
+            }
+
+            let read_data = pn532
+                .process(
+                    &pn532::Request::mifare_classic_authenticate_block(uid, block_number, pn532::requests::MifareAuthKey::A(key)),
+                    7,
+                    end_time - Instant::now(),
+                )
+                .await?;
+
+            if error_on_errnums.contains(&read_data[0]) {
+                // not retrying on these errors
+                return Err(Error::Pn532ExtError(read_data[0]));
+            }
+
+            match read_data[0] {
+                0 => {
+                    *currently_authenticated_sector = Some(block_number / 4);
+                    break;
+                }
+                0x14 => {
+                    // not logging since it happens on every non bambu Mifare tag
+                    error!("Authentication of block {block_number} (relevant sector) rejected");
+                    return Err(Error::AuthenticationError);
+                }
+                _ => {
+                    last_err = read_data[0];
+                    warn!(
+                        "Error {} during authentication of block {block_number}, retrying",
+                        last_err
+                    );
+                    continue;
+                }
+            }
+        }
+    }
+
+    loop {
+        if Instant::now() > end_time {
+            error!("Tag read timeout error");
+            return Err(Error::Pn532Error(pn532::Error::TimeoutResponse)); // using the Pn532Error, not sure if good practice
+        }
+
+        let read_data = pn532
+            .process(
+                &pn532::Request::mifare_classic_read_data_block(block_number),
+                17,
+                end_time - Instant::now(),
+            )
+            .await?;
+
+        if error_on_errnums.contains(&read_data[0]) {
+            // not retrying on these errors
+            return Err(Error::Pn532ExtError(read_data[0]));
+        }
+
+        if read_data[0] != 0x00 {
+            // first byte signals if read was ok
+            last_err = read_data[0];
+            warn!(
+                "Error {} during NFC read of block {block_number}, retrying",
+                last_err
+            );
+            continue;
+        }
+
+        let n = min(read_data.len() - 1, buf.len());
+        buf[..n].copy_from_slice(&read_data[1..n + 1]); // skip the 0 (that represents error or ok) at the beginning
+        if n < buf.len() {
+            buf[n..].fill(0);
+        }
+        // debug!(">>>> [{block_number:2}] read read_data: {buf:X?}");
+        return Ok(n);
+    }
+}
+
+use core::convert::TryInto;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+pub struct BambulabKeys {
+    okm: Vec<u8>,
+}
+
+impl BambulabKeys {
+    pub fn sector_key(&self, sector_number: u8) -> &[u8; 6] {
+        self.okm
+            .get(sector_number as usize * 6..(sector_number as usize + 1) * 6)
+            .expect("slice out of bounds")
+            .try_into()
+            .expect("slice not length 6")
+    }
+    pub fn block_key(&self, block_number: u8) -> &[u8; 6] {
+        self.sector_key(block_number / 4)
+    }
+}
+// impl BambulabKeys {
+//     pub fn sector_key(&self, sector_number: usize) -> &[u8;6] {
+//         self.okm.get(sector_number*6 .. (sector_number+1) *6).try_into().unwrap()
+//     }
+// }
+
+pub fn bambulab_keys(uid: &[u8]) -> BambulabKeys {
+    let master = [
+        0x9a, 0x75, 0x9c, 0xf2, 0xc4, 0xf7, 0xca, 0xff, 0x22, 0x2c, 0xb9, 0x76, 0x9b, 0x41, 0xbc,
+        0x96,
+    ];
+    let context = b"RFID-A\0";
+    let num_keys = 16;
+    let key_length = 6;
+    let total_length = num_keys * key_length; // 96 bytes
+
+    // HKDF-Extract: PRK = HMAC-Hash(salt, IKM)
+    let mut extract = Hmac::<Sha256>::new_from_slice(&master).unwrap();
+    extract.update(uid);
+    let prk = extract.finalize().into_bytes();
+
+    // HKDF-Expand: Generate enough blocks
+    let hash_len = 32; // SHA256 output length
+    #[allow(clippy::manual_div_ceil)]
+    let n = (total_length + hash_len - 1) / hash_len; // Number of blocks needed
+    let mut okm = Vec::with_capacity(total_length);
+    let mut t = Vec::new();
+
+    for i in 1..=n {
+        let mut expand = Hmac::<Sha256>::new_from_slice(&prk).unwrap();
+        expand.update(&t);
+        expand.update(context);
+        expand.update(&[i as u8]);
+        t = expand.finalize().into_bytes().to_vec();
+        okm.extend_from_slice(&t);
+    }
+    BambulabKeys { okm }
 }
