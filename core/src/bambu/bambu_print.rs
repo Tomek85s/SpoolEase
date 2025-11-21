@@ -209,7 +209,8 @@ impl BambuPrinter {
             for tray_id in 0..self.ams_trays().len() {
                 self.update_ams_tray(tray_id, |tray| tray.meta_info.used_in_print = false);
             }
-            self.update_virt_tray(|tray| tray.meta_info.used_in_print = false);
+            // TODO: external (update both)
+            self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = false);
 
             for tray_id in ams_mapping {
                 let tray_id = *tray_id as usize;
@@ -222,12 +223,14 @@ impl BambuPrinter {
             if let Some(ams_mapping2) = &print.ams_mapping2 {
                 for ams2_info in ams_mapping2 {
                     if ams2_info.ams_id == 255 && ams2_info.slot_id == 0 {
-                        self.update_virt_tray(|tray| tray.meta_info.used_in_print = true);
+                        // TODO: external
+                        self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = true);
                         changed = true;
                     }
                 }
             } else if use_ams == Some(false) {
-                self.update_virt_tray(|tray| tray.meta_info.used_in_print = true);
+                // TODO: external ???
+                self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = true);
                 changed = true;
             }
         }
@@ -432,7 +435,8 @@ impl BambuPrinter {
             for tray_id in 0..self.ams_trays().len() {
                 self.update_ams_tray(tray_id, |tray| tray.meta_info.used_in_print = false);
             }
-            self.update_virt_tray(|tray| tray.meta_info.used_in_print = false);
+            // TODO: external (update both)
+            self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = false);
         }
 
         changed

@@ -1292,7 +1292,8 @@ impl ViewModel {
         for tray_row in 0..trays_state.row_count() {
             let ui_tray_id = trays_state.row_data(tray_row).unwrap().id;
             let curr_tray = if ui_tray_id == 254 {
-                bambu_printer.virt_tray()
+                // TODO: external
+                &bambu_printer.virt_trays()[0]
             } else {
                 &bambu_printer.ams_trays()[ui_tray_id as usize]
             };
@@ -2078,6 +2079,7 @@ impl ViewModel {
                         128..135 => {
                             format!("HT-{}", (b'A' + (ams_id as u8 - 128)) as char)
                         }
+                        // TODO: external - deal with this display in inventory correctly (Ext Left, vs Right, vs just External when just one extruder)
                         255 => "Ext".to_string(),
                         _ => String::new(),
                     };
