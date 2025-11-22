@@ -480,19 +480,20 @@ export global AppState {
         self.user-message-type = StatusType.Success;
     }
 
-    public function tray-update-failed(printer: string, configured-entity: string, ams-id: int, tray-id: int, err-txt: string) {
+    public function tray-update-failed(printer: string, configured-entity: string, err-txt: string) {
         self.control-state = ControlState.PostAction;
         self.user-message = "Failed to Configure\n\{configured-entity}\n\{err-txt}";
         self.user-message-type = StatusType.Error;
     }
 
     // ams-id here is as follows : 0..3 (normal), 4.. (HT), 255 (external)
-    // tray-id is the tray number inside the AMS (in HT all are 0) or 254 for external
-    public function tray-update-succeeded(printer: string, configured-entity: string, ams-id: int, tray-id: int) {
+    // tray-id is the tray number inside the AMS (in HT all are 0) or 254/255 for external
+    public function tray-update-succeeded(printer: string, configured-entity: string, tray-id: int) {
         self.control-state = ControlState.PostAction;
         self.user-message = "Configured Successfully\n\{configured-entity}";
         self.user-message-type = StatusType.Success;
-        start-highlight-tray((tray-id == 254) ? 254 : get_tray_id(ams-id, tray-id));
+        // Done: TODO: external
+        start-highlight-tray(tray-id);
         if printer != self.curr-printer {
             self.set-later-curr-printer(printer)
         }
@@ -505,7 +506,7 @@ export global AppState {
         if ams-id <= 3 + 8 {
             return 16 + ams-id - 4;
         }
-        return 254;
+        return ams-id; // 254 or 255
     }
 
     pure public function get_tray_index(ams-id: int, tray-id: int) -> int {
@@ -515,7 +516,11 @@ export global AppState {
         if ams-id <= 3 + 8 {
             return 16 + ams-id - 4 + 2;
         }
-        return 0;
+        if ams_id == 254 {
+            return 1;
+        } else {
+            return 0;
+        }
     }
 
     public function staging-selected() {
@@ -736,7 +741,7 @@ export global AppState {
         return [
   // External (Right)
             {
-                id: 254,
+                id: 255,
                 external: true,
                 spool-state: UiTrayState.Unknown,
                 filament: {
@@ -753,7 +758,7 @@ export global AppState {
 
   // External (Right)
             {
-                id: 255,
+                id: 254,
                 external: true,
                 spool-state: UiTrayState.Unknown,
                 filament: {

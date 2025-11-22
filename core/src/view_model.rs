@@ -49,7 +49,7 @@ use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
 use crate::ssdp::{ssdp_task, SSDPPubSubChannel};
 use crate::store::{store_safe_time_now, Store, StoreObserver};
 
-use crate::tag_standards::{BAMBULAB_TAG_TYPE, BambuLabTag};
+use crate::tag_standards::{BambuLabTag, BAMBULAB_TAG_TYPE};
 use crate::types::FilamentSupInfo;
 // use crate::web_app::EncodeInfoDTO;
 use crate::{
@@ -598,9 +598,11 @@ impl ViewModel {
 
         let moved_view_model = self.view_model.clone().unwrap();
         ui_app_backend.on_import_definition_tag_to_inventory(move |tag_definition_type, tag_definition_info, empty_spool_weight| {
-            moved_view_model
-                .borrow()
-                .ui_import_definition_tag_to_inventory(tag_definition_type.as_str(), tag_definition_info.as_str(), empty_spool_weight)
+            moved_view_model.borrow().ui_import_definition_tag_to_inventory(
+                tag_definition_type.as_str(),
+                tag_definition_info.as_str(),
+                empty_spool_weight,
+            )
         });
 
         let moved_view_model = self.view_model.as_ref().unwrap().clone();
@@ -677,7 +679,11 @@ impl ViewModel {
                     .global::<crate::app::AppState>()
                     .invoke_set_curr_printer(selected_printer.to_shared_string());
                 borrowed_view_model.bambu_printer_model.index = i;
-                moved_ui.unwrap().global::<crate::app::AppState>().set_curr_ams_id(0); // while strange, this is importnat here for restoring curr_ams after, next call will set it to the first (in case 0 doesn't exist)
+
+                // while strange, this is importnat here for restoring curr_ams after, next call will set it to the first (in case 0 doesn't exist)
+                // Internally this will pass only for the currently displayed printer in the UI
+                moved_ui.unwrap().global::<crate::app::AppState>().set_curr_ams_id(0);
+
                 borrowed_view_model.update_ui_from_printer(&borrowed_view_model.bambu_printer_model.printers[i].borrow());
                 // now we'll resrore to the corret curr_ams if user was already there before, if not it will stay on the correct first ams
                 if let Some(printer_view_state) = &borrowed_view_model.printers_view_state.get(&selected_printer_string) {
@@ -779,18 +785,13 @@ impl ViewModel {
         ui: &slint::Weak<crate::app::AppWindow>,
         tray_id: i32,
     ) {
-        let (ams_id, tray_id_for_ui) = BambuPrinter::get_ams_and_tray_id(tray_id as usize);
-        // let tray_id = tray_id_for_ui as i32;
-        let tray_id_for_ui = tray_id_for_ui as i32;
-        let ams_id_for_ui = Self::ams_id_for_ui(ams_id);
-        let full_slot_description = Self::full_slot_description(tray_id);
+        let tray_id_for_ui = tray_id;
+        let full_slot_description = Self::full_slot_description(bambu_printer, tray_id);
         let mut filament_staging = filament_staging.borrow_mut();
         if bambu_printer.printer_connectivity_ok != Some(true) {
             ui.unwrap().global::<crate::app::AppState>().invoke_tray_update_failed(
                 bambu_printer.printer_selector_name.to_shared_string(),
                 full_slot_description.into(),
-                ams_id_for_ui,
-                tray_id_for_ui,
                 "Printer disconnected".to_shared_string(),
             );
         } else if let Some(full_spool_rec) = filament_staging.full_spool_rec() {
@@ -808,53 +809,44 @@ impl ViewModel {
                 ui.unwrap().global::<crate::app::AppState>().invoke_tray_update_succeeded(
                     bambu_printer.printer_selector_name.to_shared_string(),
                     full_slot_description.into(),
-                    ams_id_for_ui,
                     tray_id_for_ui,
                 );
             } else {
                 ui.unwrap().global::<crate::app::AppState>().invoke_tray_update_failed(
                     bambu_printer.printer_selector_name.to_shared_string(),
                     full_slot_description.into(),
-                    ams_id_for_ui,
-                    tray_id_for_ui,
                     "Unknown Nozzle Temps".to_shared_string(),
                 );
             }
         }
     }
 
-    fn full_slot_description(tray_id: i32) -> String {
-        let (ams_id, slot_in_ams) = BambuPrinter::get_ams_and_tray_id(tray_id as usize);
+    fn full_slot_description(bambu_printer: &BambuPrinter, tray_id: i32) -> String {
+        let (ams_id, slot_in_ams) = BambuPrinter::get_ams_and_slot_id(tray_id as usize);
         if ams_id <= 3 {
-            format!("{} Slot {}", Self::ams_name(ams_id), slot_in_ams + 1)
+            format!("{} Slot {}", Self::ams_name(bambu_printer, ams_id), slot_in_ams + 1)
         } else {
-            Self::ams_name(ams_id)
+            Self::ams_name(bambu_printer, ams_id)
         }
     }
 
-    // TODO: external - deal with left/right external
-    fn ams_name(ams_id: usize) -> String {
+    // Done:  TODO: external - deal with left/right external
+    fn ams_name(bambu_printer: &BambuPrinter, ams_id: usize) -> String {
         if ams_id <= 3 {
             format!("AMS-{}", (b'A' + ams_id as u8) as char)
         } else if (128..128 + 8).contains(&ams_id) {
             format!("HT-{}", (b'A' + (ams_id - 128) as u8) as char)
         } else if ams_id == 255 {
-            "External Spool Holder".into()
+            if bambu_printer.num_extruders() == 1 {
+                "External Spool".into()
+            } else {
+                "Right External Spool".into()
+            }
+        } else if ams_id == 254 {
+            "Left External Spool".into()
         } else {
             format!("AMS-#{ams_id}?")
         }
-    }
-
-    // returns AMS 0..3 for standard, 4.. for HT and 254 for External
-    fn ams_id_for_ui(ams_id: usize) -> i32 {
-        let ams_id_for_ui = if ams_id <= 3 {
-            ams_id
-        } else if ams_id <= 3 + 8 {
-            ams_id - 128 + 4
-        } else {
-            255
-        };
-        ams_id_for_ui as i32
     }
 
     fn set_staging_to_tray(
@@ -930,8 +922,8 @@ impl ViewModel {
     }
 
     fn ui_configure_slot_with_spool_id(&self, slot_id: i32, spool_id: &str) {
-        let _ = self.dispatch_async_task(AppAsyncTaskRequest::ConfigureSlotWithSpool {
-            slot_id,
+        let _ = self.dispatch_async_task(AppAsyncTaskRequest::ConfigureTrayWithSpool {
+            tray_id: slot_id,
             spool_id: spool_id.to_string(),
         });
     }
@@ -1083,7 +1075,12 @@ impl ViewModel {
         }
     }
 
-    fn ui_get_spool_tag_definition_display(&self, tag_definition_type: &str, tag_definition_info: &str, empty_spool_weight: i32) -> UiSpoolRecordDisplay {
+    fn ui_get_spool_tag_definition_display(
+        &self,
+        tag_definition_type: &str,
+        tag_definition_info: &str,
+        empty_spool_weight: i32,
+    ) -> UiSpoolRecordDisplay {
         match tag_definition_type {
             BAMBULAB_TAG_TYPE => {
                 if let Ok(bambu_tag) = serde_json::from_str::<BambuLabTag>(tag_definition_info) {
@@ -1101,23 +1098,23 @@ impl ViewModel {
                         slicer_filament: spool_rec.slicer_filament.into(),
                         weight_advertised: spool_rec.weight_advertised.unwrap_or_default(),
                         weight_core: spool_rec.weight_core.unwrap_or_default(),
-                        ..
-                        Default::default()
+                        ..Default::default()
                     };
-                    
-                    let (slicer_filament_name, temp_min, temp_max) = if let Some(filament_info) = &self.get_filament_info(&record.slicer_filament, None) {
-                        (
-                            slint::format!(
-                                "{}{}",
-                                filament_info.slicer_name,
-                                if filament_info.base_filament { " (base)" } else { "" }
-                            ),
-                            filament_info.nozzle_temp_low,
-                            filament_info.nozzle_temp_high,
-                        )
-                    } else {
-                        Default::default()
-                    };
+
+                    let (slicer_filament_name, temp_min, temp_max) =
+                        if let Some(filament_info) = &self.get_filament_info(&record.slicer_filament, None) {
+                            (
+                                slint::format!(
+                                    "{}{}",
+                                    filament_info.slicer_name,
+                                    if filament_info.base_filament { " (base)" } else { "" }
+                                ),
+                                filament_info.nozzle_temp_low,
+                                filament_info.nozzle_temp_high,
+                            )
+                        } else {
+                            Default::default()
+                        };
 
                     let color = if record.color_code.len() >= 6 {
                         let color = u32::from_str_radix(&record.color_code[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
@@ -1132,8 +1129,7 @@ impl ViewModel {
                         temp_min,
                         temp_max,
                         color,
-                        ..
-                        Default::default()
+                        ..Default::default()
                     }
                 } else {
                     error!("Internal Error, failed to parse definition info");
@@ -1260,7 +1256,6 @@ impl ViewModel {
         // note - accepting bambu_printer rather than taking from self, because it may be called during callback on_trays_update,
         // and that's taking place when it's already borrowed and another borrow will panic
 
-
         let current_selected_printer = self.bambu_printer_model.index;
         if bambu_printer.printer_index != current_selected_printer {
             warn!("Internal Error: Requested to update UI for non active printer");
@@ -1268,7 +1263,8 @@ impl ViewModel {
         }
 
         let ui = self.ui_weak.unwrap();
-        ui.global::<crate::app::AppState>().set_num_extruders(bambu_printer.num_extruders() as i32);
+        ui.global::<crate::app::AppState>()
+            .set_num_extruders(bambu_printer.num_extruders() as i32);
         // ----- handle number of ams's and curr_ams -----
         // OPT: calculate only when ams_exists change (store in printer struct), here use the value calculated there
         //      don't forget to consider loading the ams_exist from state which will need to recalculate, so add inner_set_ams_exist_bits
@@ -1300,10 +1296,10 @@ impl ViewModel {
         // OPT: run only on real trays (consider also AMS-HT), use the ams_exists from above
         for tray_row in 0..trays_state.row_count() {
             let ui_tray_id = trays_state.row_data(tray_row).unwrap().id;
-            // TODO: external - need to swap 254 and 255 maybe? or use ams_id/slot_id instead
+            // Done:  TODO: external - need to swap 254 and 255 maybe? or use ams_id/slot_id instead
             let curr_tray = match ui_tray_id {
-                254 => &bambu_printer.virt_trays()[0],
-                255 => continue,
+                255 => &bambu_printer.virt_trays()[0],
+                254 => &bambu_printer.virt_trays()[1],
                 _ => &bambu_printer.ams_trays()[ui_tray_id as usize],
             };
             let mut ui_tray = trays_state.row_data(tray_row).unwrap().clone();
@@ -1719,7 +1715,7 @@ impl ViewModel {
                     let new_spool_rec_ext = SpoolRecordExt {
                         tag: Some(tag.clone()),
                         k_info: tag_k_info,
-                        origin_data: Some(OriginData::SpoolEaseV1 { uid: tag_id_hex, url: tag })
+                        origin_data: Some(OriginData::SpoolEaseV1 { uid: tag_id_hex, url: tag }),
                     };
                     match store.add_spool(new_spool_rec.clone(), new_spool_rec_ext.clone()).await {
                         Ok(new_spool_rec_id) => (Ok(()), new_spool_rec_id, Some(new_spool_rec_ext)),
@@ -1792,7 +1788,12 @@ impl ViewModel {
         }
     }
 
-    async fn import_definition_tag_to_inventory_async(view_model: Rc<RefCell<ViewModel>>, tag_definition_type: String, tag_definition_info: String, empty_spool_weight: i32) {
+    async fn import_definition_tag_to_inventory_async(
+        view_model: Rc<RefCell<ViewModel>>,
+        tag_definition_type: String,
+        tag_definition_info: String,
+        empty_spool_weight: i32,
+    ) {
         match tag_definition_type.as_str() {
             BAMBULAB_TAG_TYPE => {
                 if let Ok(bambulab_tag) = serde_json::from_str::<BambuLabTag>(&tag_definition_info) {
@@ -1800,7 +1801,11 @@ impl ViewModel {
                     if empty_spool_weight != 0 {
                         new_spool_rec.weight_core = Some(empty_spool_weight);
                     }
-                    let new_spool_rec_ext = SpoolRecordExt { tag: None, k_info: None, origin_data: Some(OriginData::BambuLabTag { bambulab_tag } )};
+                    let new_spool_rec_ext = SpoolRecordExt {
+                        tag: None,
+                        k_info: None,
+                        origin_data: Some(OriginData::BambuLabTag { bambulab_tag }),
+                    };
 
                     let store = view_model.borrow().store.clone();
                     let ui = view_model.borrow().ui_weak.unwrap();
@@ -1993,7 +1998,7 @@ impl ViewModel {
         }
     }
 
-    async fn configure_slot_with_spool_async(view_model: Rc<RefCell<ViewModel>>, slot_id: i32, spool_id: String) {
+    async fn configure_tray_with_spool_async(view_model: Rc<RefCell<ViewModel>>, tray_id: i32, spool_id: String) {
         let store = view_model.borrow().store.clone();
         if let Some(spool_rec) = store.get_spool_by_id(&spool_id) {
             let mut full_spool_rec = FullSpoolRecord {
@@ -2006,10 +2011,9 @@ impl ViewModel {
                         full_spool_rec.spool_rec_ext = spool_rec_ext;
 
                         let view_model_borrow = view_model.borrow();
-                        let (ams_id, tray_id_for_ui) = BambuPrinter::get_ams_and_tray_id(slot_id as usize);
-                        let tray_id_for_ui = tray_id_for_ui as i32;
-                        let ams_id_for_ui = Self::ams_id_for_ui(ams_id);
-                        let full_slot_description = Self::full_slot_description(slot_id);
+                        let tray_id_for_ui = tray_id;
+                        let full_slot_description = Self::full_slot_description(&view_model.borrow().bambu_printer_model.borrow(), tray_id);
+                        // Done: TODO: external - verify ams_id for ui/etc. are correct by new conventions
                         view_model_borrow
                             .ui_weak
                             .unwrap()
@@ -2017,7 +2021,6 @@ impl ViewModel {
                             .invoke_tray_update_succeeded(
                                 full_slot_description.into(),
                                 view_model_borrow.bambu_printer_model.borrow().printer_selector_name.to_shared_string(),
-                                ams_id_for_ui,
                                 tray_id_for_ui,
                             );
                     }
@@ -2039,7 +2042,7 @@ impl ViewModel {
                 .get_filament_info(&full_spool_rec.spool_rec.slicer_filament, Some(&full_spool_rec.spool_rec.material_type));
             if let Some(filament_info) = filament_info {
                 view_model.borrow().bambu_printer_model.borrow_mut().set_tray_filament(
-                    slot_id,
+                    tray_id,
                     &full_spool_rec,
                     filament_info.nozzle_temp_low as u32,
                     filament_info.nozzle_temp_high as u32,
@@ -2055,7 +2058,7 @@ impl ViewModel {
                 );
             }
         } else {
-            error!("Spool {spool_id} not found when trying to configure slot {slot_id}");
+            error!("Spool {spool_id} not found when trying to configure slot {tray_id}");
             view_model.borrow().message_box(
                 "Configure Slot Notice",
                 &format!("Spool {spool_id} Not Found"),
@@ -2077,19 +2080,26 @@ impl ViewModel {
         let num_of_printers = self.bambu_printer_model.printers.len();
         for printer in &self.bambu_printer_model.printers {
             let printer_borrow = printer.borrow();
-            for tray_id in (0..printer_borrow.ams_trays().len() - 1).chain(core::iter::once(254)) {
+            for tray_id in (0..printer_borrow.ams_trays().len() - 1).chain([254, 255]) {
                 // TODO: need to fix for H2 Series, deal with two external spools
                 if let Some(spool_id) = &printer_borrow.get_any_tray(tray_id).meta_info.spool_id {
-                    let (ams_id, tray_id_in_ams) = BambuPrinter::get_ams_and_tray_id(tray_id);
+                    let (ams_id, slot_id) = BambuPrinter::get_ams_and_slot_id(tray_id);
                     let tray_name = match ams_id {
                         0..=3 => {
-                            format!("{}{}", (b'A' + ams_id as u8) as char, tray_id_in_ams + 1)
+                            format!("{}{}", (b'A' + ams_id as u8) as char, slot_id + 1)
                         }
                         128..135 => {
                             format!("HT-{}", (b'A' + (ams_id as u8 - 128)) as char)
                         }
-                        // TODO: external - deal with this display in inventory correctly (Ext Left, vs Right, vs just External when just one extruder)
-                        255 => "Ext".to_string(),
+                        // Done: TODO: external - deal with this display in inventory correctly (Ext Left, vs Right, vs just External when just one extruder)
+                        255 => {
+                            if printer_borrow.num_extruders() == 1 {
+                                "Ext".to_string()
+                            } else {
+                                "Ext Right".to_string()
+                            }
+                        }
+                        254 => "Ext Left".to_string(),
                         _ => String::new(),
                     };
                     if num_of_printers > 1 {
@@ -2860,6 +2870,10 @@ pub async fn printers_scheduled_store_state_task(framework: Rc<RefCell<Framework
     term_info!("Restoring printer(s) state");
     for printer_index in 0..num_of_printers {
         let printer = view_model.borrow().bambu_printer_model.printers[printer_index].clone();
+        if printer.borrow().printer_name().to_lowercase() == "simulator" {
+            info!("[{}] Printer Simulator - skipping restore state", printer.borrow().printer_number);
+            continue;
+        }
         if let Err(err) = BambuPrinter::load_printer_state(&framework, &printer, &store).await {
             view_model
                 .borrow()
@@ -3123,8 +3137,8 @@ enum AppAsyncTaskRequest {
     UpdateSpoolRec {
         spool_rec: SpoolRecord,
     },
-    ConfigureSlotWithSpool {
-        slot_id: i32,
+    ConfigureTrayWithSpool {
+        tray_id: i32,
         spool_id: String,
     },
     ImportDefinitionTagToInventory {
@@ -3171,14 +3185,17 @@ pub async fn app_async_task(view_model: Rc<RefCell<ViewModel>>) {
                 from_button,
             } => ViewModel::set_spool_weight_async(view_model.clone(), spool_id, weight_current, weight_new, final_step, from_button).await,
             AppAsyncTaskRequest::UpdateSpoolRec { spool_rec } => ViewModel::update_spool_rec_async(view_model.clone(), spool_rec).await,
-            AppAsyncTaskRequest::ConfigureSlotWithSpool { slot_id, spool_id } => {
-                ViewModel::configure_slot_with_spool_async(view_model.clone(), slot_id, spool_id).await
+            AppAsyncTaskRequest::ConfigureTrayWithSpool { tray_id, spool_id } => {
+                ViewModel::configure_tray_with_spool_async(view_model.clone(), tray_id, spool_id).await
             }
             AppAsyncTaskRequest::ImportDefinitionTagToInventory {
                 tag_definition_type,
                 tag_definition_info,
                 empty_spool_weight,
-            } => ViewModel::import_definition_tag_to_inventory_async(view_model.clone(), tag_definition_type, tag_definition_info, empty_spool_weight).await,
+            } => {
+                ViewModel::import_definition_tag_to_inventory_async(view_model.clone(), tag_definition_type, tag_definition_info, empty_spool_weight)
+                    .await
+            }
         }
     }
 }

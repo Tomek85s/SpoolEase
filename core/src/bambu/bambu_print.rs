@@ -132,7 +132,10 @@ impl PrintProject {
         self.inner_consume_index
     }
 
-    pub(super) fn get_ams_id(&self, filament_id: i32) -> Option<i32> {
+    // Done? TODO: external - how are external prints represented in old API and new API
+    //       handled it but not sure it's right, need to test
+    pub(super) fn get_ams_mapping_tray_id(&self, filament_id: i32) -> Option<i32> {
+        // This function prioritize old firmware API (ams_mapping) and resorts to new (ams_mapping2) in case it's not there
         if filament_id >= 0 {
             let ams_slot = self.ams_mapping.get(filament_id as usize).copied();
             // external spool handlig is a bit complex to be prepared to deal both with case of
@@ -143,11 +146,13 @@ impl PrintProject {
                 if let Some(ams_mapping2) = &self.ams_mapping2 {
                     if let Some(ams2_info) = ams_mapping2.get(filament_id as usize) {
                         if ams2_info.ams_id == 255 && ams2_info.slot_id == 0 {
+                            return Some(255);
+                        } else if ams2_info.ams_id == 254 && ams2_info.slot_id == 0 {
                             return Some(254);
                         }
                     }
                 } else if self.use_ams == Some(false) {
-                    return Some(254);
+                    return Some(255);
                 }
             }
             ams_slot
@@ -206,11 +211,11 @@ impl BambuPrinter {
 
             // set trays used in print, but first clear all
 
-            for tray_id in 0..self.ams_trays().len() {
-                self.update_ams_tray(tray_id, |tray| tray.meta_info.used_in_print = false);
+            for tray_id in (0..self.ams_trays().len()).chain(core::iter::once(254)).chain(core::iter::once(255))  {
+                self.update_any_tray(tray_id, |tray| tray.meta_info.used_in_print = false);
             }
-            // TODO: external (update both)
-            self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = false);
+            // Done:  TODO: external (update both) // Done by including in code above with chain and unpdate_any_tray
+            // self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = false);
 
             for tray_id in ams_mapping {
                 let tray_id = *tray_id as usize;
@@ -220,16 +225,22 @@ impl BambuPrinter {
                 }
             }
 
+            // Done: TODO: external
             if let Some(ams_mapping2) = &print.ams_mapping2 {
                 for ams2_info in ams_mapping2 {
                     if ams2_info.ams_id == 255 && ams2_info.slot_id == 0 {
-                        // TODO: external
+                        // Done: TODO: external
                         self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = true);
                         changed = true;
-                    }
+                    } else if ams2_info.ams_id == 254 && ams2_info.slot_id == 0 {
+                        // Done: TODO: external
+                        self.update_virt_tray(1, |tray| tray.meta_info.used_in_print = true);
+                        changed = true;
+                    } 
                 }
             } else if use_ams == Some(false) {
-                // TODO: external ???
+                // Done: TODO: external ??? Case of old firmwares only with single extruder?
+                //       So seems like nothing to be done here
                 self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = true);
                 changed = true;
             }
@@ -338,7 +349,7 @@ impl BambuPrinter {
             }
 
             if tray_active_change {
-                debugex!(">>>>> tray_active change (from {:?} to {})", curr_tray_active, new_tray_active);
+                debugex!(">>>>> tray_active change (from {:?} to {:?})", curr_tray_active, new_tray_active);
                 changed |= self.try_consume(curr_print_project, ConsumeType::FilamentSwitch);
             }
 
@@ -379,7 +390,7 @@ impl BambuPrinter {
                 curr_print_project.need_consume = true;
             }
 
-            if tray_active_change && new_tray_active != 255 {
+            if tray_active_change && new_tray_active.is_some() {
                 // debugex!(">>>>> tray_now_change, set need_consume true");
                 curr_print_project.need_consume = true;
             }
@@ -432,11 +443,11 @@ impl BambuPrinter {
             self.curr_print_project = None;
             channel_send(&self.store_state_request_channel, StoreStateRequest::DeletePrintProject { printer_index: self.printer_index });
 
-            for tray_id in 0..self.ams_trays().len() {
-                self.update_ams_tray(tray_id, |tray| tray.meta_info.used_in_print = false);
+            for tray_id in (0..self.ams_trays().len()).chain([254,255])  {
+                self.update_any_tray(tray_id, |tray| tray.meta_info.used_in_print = false);
             }
-            // TODO: external (update both)
-            self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = false);
+            // Done: TODO: external (update both) // Done by incorporating into code right above with chain and update_any_tray
+            // self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = false);
         }
 
         changed
@@ -465,7 +476,8 @@ impl BambuPrinter {
                         debugex!(">>>>>> Checking curr usage entry {usage_entry:?}");
                         if usage_entry.layer < up_to_layer_num || up_to_layer_num == -1 {
                             // comparing with previous layer - to consume all previous layers in case of skip
-                            if let Some(usage_entry_tray_id) = print_project.get_ams_id(usage_entry.gcode_filament_id) {
+                            if let Some(usage_entry_tray_id) = print_project.get_ams_mapping_tray_id(usage_entry.gcode_filament_id) {
+                                // Done?  TODO: external: Verify the usage_entry_tray_id is consistent with 254/255 numbers for external trays
                                 self.update_any_tray(usage_entry_tray_id as usize, |ams_tray| {
                                     ams_tray.meta_info.consumed_since_load += usage_entry.weight_g;
                                     ams_tray.meta_info.consumed_since_weight += usage_entry.weight_g; 
@@ -494,14 +506,15 @@ impl BambuPrinter {
             ConsumeType::FilamentSwitch => {
                 if let Some(usage_entry) = print_project.curr_usage_entry() {
                     debugex!(">>>>>> Checking curr usage entry {usage_entry:?}");
-                    if let Some(usage_entry_tray_id) = print_project.get_ams_id(usage_entry.gcode_filament_id) {
+                    if let Some(usage_entry_tray_id) = print_project.get_ams_mapping_tray_id(usage_entry.gcode_filament_id) {
                         debugex!(">>>>> self.layer_num = {}", self.layer_num);
                         debugex!(">>>>> self.get_tray_active() = {:?}", self.get_tray_active());
                         debugex!(">>>>> usage_entry_tray_id = {usage_entry_tray_id}");
                         if self.layer_num == usage_entry.layer
-                            && self.get_tray_active() == usage_entry_tray_id
+                            && self.get_tray_active() == Some(usage_entry_tray_id)
                             && (0..self.ams_trays().len() as i32).contains(&usage_entry_tray_id)
                         {
+                            // Done?: TODO: external: Verify the usage_entry_tray_id is consistent with 254/255 numbers for external trays
                             self.update_any_tray(usage_entry_tray_id as usize, |ams_tray| {
                                     ams_tray.meta_info.consumed_since_load += usage_entry.weight_g;
                                     ams_tray.meta_info.consumed_since_weight += usage_entry.weight_g;
