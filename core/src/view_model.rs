@@ -832,6 +832,7 @@ impl ViewModel {
         }
     }
 
+    // TODO: external - deal with left/right external
     fn ams_name(ams_id: usize) -> String {
         if ams_id <= 3 {
             format!("AMS-{}", (b'A' + ams_id as u8) as char)
@@ -1267,6 +1268,7 @@ impl ViewModel {
         }
 
         let ui = self.ui_weak.unwrap();
+        ui.global::<crate::app::AppState>().set_num_extruders(bambu_printer.num_extruders() as i32);
         // ----- handle number of ams's and curr_ams -----
         // OPT: calculate only when ams_exists change (store in printer struct), here use the value calculated there
         //      don't forget to consider loading the ams_exist from state which will need to recalculate, so add inner_set_ams_exist_bits

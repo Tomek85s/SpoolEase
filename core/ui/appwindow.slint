@@ -128,9 +128,14 @@ export component AppWindow inherits Window {
 
                     external := Trays {
                         is_ams: false;
-                        title: "External"; //"\{AppState.highlight-box}";
-                        tray_numbers: [0];
+                        title: AppState.num-extruders == 1 ? "External" : AppState.displayed-extruder == 0 ? "Ext Right" : "Ext Left";
+                        tray_numbers: [AppState.displayed-extruder];
                         trays-state: AppState.trays-state;
+                        title-clicked => { 
+                          if AppState.num-extruders == 2 {
+                            AppState.displayed-extruder = 1 - AppState.displayed-extruder;
+                          }
+                        }
                     }
                 }
 

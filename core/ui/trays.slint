@@ -205,6 +205,7 @@ component Tray inherits Window {
 }
 
 export component Trays {
+    callback title-clicked;
     in-out property <[int]> tray_numbers;
     in-out property <[UiTray]> trays-state;
     in property <string> title: "External";
@@ -220,7 +221,7 @@ export component Trays {
 
             Rectangle {
                 background: @linear-gradient(180deg, #09009B 0%, #0000CA 39%, #001dff 100%);
-                Text {
+                if !is_ams : Text {
                     text: root.title;
                     font-size: 20px;
                     color: white;
@@ -239,6 +240,11 @@ export component Trays {
                         trays-state: trays-state;
                         active: AppState.curr-ams-id == ams-id;
                     }
+                }
+                if !is_ams: TouchArea {
+                  width: parent.width;
+                  height: parent.height;
+                  clicked => { root.title-clicked() }
                 }
             }
         }
