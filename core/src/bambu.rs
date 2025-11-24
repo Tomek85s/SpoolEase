@@ -421,7 +421,7 @@ impl BambuPrinter {
         // Some of this section (not all) can be potentially removed in the future since state consume_since_weight should be available and updated
         // This is only for transition time where the there was no consumed_since_weight in the metainfo for correct display calculation
         // The removal of non existing ID's need to stay
-        for tray_id in (0..self.ams_trays().len()).chain(core::iter::once(254)).chain(core::iter::once(255)) {
+        for tray_id in (0..self.ams_trays().len()).chain([254, 255]) {
             if self.get_any_tray(tray_id).meta_info.consumed_since_weight == 0.0 {
                 if let Some(spool_id) = self.get_any_tray(tray_id).meta_info.spool_id.as_ref() {
                     let spool_record = store.get_spool_by_id(spool_id.as_str());
