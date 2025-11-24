@@ -62,6 +62,7 @@ export component LabeledText inherits Rectangle {
     in-out property <color> label-color: blue;
     in-out property <color> text-color: black;
     in-out property <length> label-width;
+    in-out property <TextWrap> text-wrap;
     HorizontalLayout {
         thelabel := MyText {
             width: label-width;
@@ -72,6 +73,7 @@ export component LabeledText inherits Rectangle {
         MyText {
             text: text;
             color: text-color;
+            wrap: text-wrap;
         }
     }
 

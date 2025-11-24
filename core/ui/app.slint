@@ -1,4 +1,4 @@
-import { FrameworkState, OtaState } from "framework/framework.slint";
+import { FrameworkState, OtaState, Log } from "framework/framework.slint";
 import { SelectorOption } from "framework/widgets.slint";
 import { SelectorOptionsList } from "framework/widgets.slint";
 // Types
@@ -174,6 +174,7 @@ export enum NewTagScanPage {
     V1TagPrompt,
     SpoolDefinitionTagScanned, // Bambulab etc.
     BambulabSpoolTypeSelection,
+    ImportDefinitionNotice,
 }
 
 export enum NewTagOperation {
@@ -703,7 +704,7 @@ export global AppState {
             if status == "" {
           // this will be effective only if there is a weight (this will be driven by the flow in the screen itself)
                 self.new-tag-scan-spool-id = spool-id;
-                self.new-tag-scan-page = NewTagScanPage.OperationSelect;
+                self.new-tag-scan-page = NewTagScanPage.ImportDefinitionNotice;
             } else {
                 self.new-tag-scan-page = NewTagScanPage.StatusDisplay;
                 self.new-tag-scan-status = status;

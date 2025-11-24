@@ -49,9 +49,8 @@ use crate::spool_scale::{self, ScaleWeight, SpoolScaleObserver};
 use crate::ssdp::{ssdp_task, SSDPPubSubChannel};
 use crate::store::{store_safe_time_now, Store, StoreObserver};
 
-use crate::tag_standards::{BambuLabTag, BAMBULAB_TAG_TYPE};
+use crate::tag_standards::{BambuLabTag, OpenPrintTagTag, BAMBULAB_TAG_TYPE, OPENPRINTTAG_TAG_TYPE};
 use crate::types::FilamentSupInfo;
-// use crate::web_app::EncodeInfoDTO;
 use crate::{
     app_config::AppConfig,
     bambu::{self, BambuPrinter, BambuPrinterObserver, TagInformationV1, TrayState},
@@ -815,7 +814,7 @@ impl ViewModel {
                 ui.unwrap().global::<crate::app::AppState>().invoke_tray_update_failed(
                     bambu_printer.printer_selector_name.to_shared_string(),
                     full_slot_description.into(),
-                    "Unknown Nozzle Temps".to_shared_string(),
+                    slint::format!("Spool {} Missing Required Information", full_spool_rec.spool_rec.id),
                 );
             }
         }
@@ -1083,65 +1082,78 @@ impl ViewModel {
         tag_definition_info: &str,
         empty_spool_weight: i32,
     ) -> UiSpoolRecordDisplay {
-        match tag_definition_type {
+        let mut spool_rec = match tag_definition_type {
             BAMBULAB_TAG_TYPE => {
                 if let Ok(bambu_tag) = serde_json::from_str::<BambuLabTag>(tag_definition_info) {
-                    let mut spool_rec = bambu_tag.to_spool_rec();
-                    if empty_spool_weight != 0 {
-                        spool_rec.weight_core = Some(empty_spool_weight);
-                    }
-
-                    let record = UiSpoolRecord {
-                        brand: spool_rec.brand.into(),
-                        color_code: spool_rec.color_code.into(),
-                        color_name: spool_rec.color_name.into(),
-                        material_type: spool_rec.material_type.into(),
-                        material_subtype: spool_rec.material_subtype.into(),
-                        slicer_filament: spool_rec.slicer_filament.into(),
-                        weight_advertised: spool_rec.weight_advertised.unwrap_or_default(),
-                        weight_core: spool_rec.weight_core.unwrap_or_default(),
-                        ..Default::default()
-                    };
-
-                    let (slicer_filament_name, temp_min, temp_max) =
-                        if let Some(filament_info) = &self.get_filament_info(&record.slicer_filament, None) {
-                            (
-                                slint::format!(
-                                    "{}{}",
-                                    filament_info.slicer_name,
-                                    if filament_info.base_filament { " (base)" } else { "" }
-                                ),
-                                filament_info.nozzle_temp_low,
-                                filament_info.nozzle_temp_high,
-                            )
-                        } else {
-                            Default::default()
-                        };
-
-                    let color = if record.color_code.len() >= 6 {
-                        let color = u32::from_str_radix(&record.color_code[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
-                        slint::Color::from_argb_encoded(color)
-                    } else {
-                        slint::Color::default()
-                    };
-
-                    UiSpoolRecordDisplay {
-                        slicer_filament_name,
-                        spool_record: record,
-                        temp_min,
-                        temp_max,
-                        color,
-                        ..Default::default()
+                    bambu_tag.to_spool_rec()
+                } else {
+                    return UiSpoolRecordDisplay::default();
+                }
+            }
+            OPENPRINTTAG_TAG_TYPE => {
+                if let Ok(open_print_tag) = serde_json::from_str::<OpenPrintTagTag>(tag_definition_info) {
+                    match open_print_tag.to_spool_rec() {
+                        Ok(spool_rec) => spool_rec,
+                        Err(_err) => {
+                            error!("Error parsing OpenPrintTag tag");
+                            return UiSpoolRecordDisplay { spool_record: UiSpoolRecord { note: "Error parsing OpenPrintTag tag".into(), ..Default::default() }, ..Default::default() };
+                        }
                     }
                 } else {
-                    error!("Internal Error, failed to parse definition info");
-                    UiSpoolRecordDisplay::default()
+                    return UiSpoolRecordDisplay::default();
                 }
             }
             _ => {
                 error!("Internal Error, unexpected tag definition type");
-                UiSpoolRecordDisplay::default()
+                return UiSpoolRecordDisplay::default();
             }
+        };
+
+        if empty_spool_weight != 0 {
+            spool_rec.weight_core = Some(empty_spool_weight);
+        }
+
+        let record = UiSpoolRecord {
+            brand: spool_rec.brand.into(),
+            color_code: spool_rec.color_code.into(),
+            color_name: spool_rec.color_name.into(),
+            material_type: spool_rec.material_type.into(),
+            material_subtype: spool_rec.material_subtype.into(),
+            slicer_filament: spool_rec.slicer_filament.into(),
+            weight_advertised: spool_rec.weight_advertised.unwrap_or_default(),
+            weight_core: spool_rec.weight_core.unwrap_or_default(),
+            note: spool_rec.note.into(),
+            ..Default::default()
+        };
+
+        let (slicer_filament_name, temp_min, temp_max) = if let Some(filament_info) = &self.get_filament_info(&record.slicer_filament, None) {
+            (
+                slint::format!(
+                    "{}{}",
+                    filament_info.slicer_name,
+                    if filament_info.base_filament { " (base)" } else { "" }
+                ),
+                filament_info.nozzle_temp_low,
+                filament_info.nozzle_temp_high,
+            )
+        } else {
+            Default::default()
+        };
+
+        let color = if record.color_code.len() >= 6 {
+            let color = u32::from_str_radix(&record.color_code[..6], 16).unwrap() + 0xFF000000; // the plus 0xFF at the end is fo add alpha
+            slint::Color::from_argb_encoded(color)
+        } else {
+            slint::Color::default()
+        };
+
+        UiSpoolRecordDisplay {
+            slicer_filament_name,
+            spool_record: record,
+            temp_min,
+            temp_max,
+            color,
+            ..Default::default()
         }
     }
 
@@ -1795,48 +1807,62 @@ impl ViewModel {
         tag_definition_info: String,
         empty_spool_weight: i32,
     ) {
-        match tag_definition_type.as_str() {
+        let (spool_rec, origin_data) = match tag_definition_type.as_str() {
             BAMBULAB_TAG_TYPE => {
                 if let Ok(bambulab_tag) = serde_json::from_str::<BambuLabTag>(&tag_definition_info) {
-                    let mut new_spool_rec = bambulab_tag.to_spool_rec();
-                    if empty_spool_weight != 0 {
-                        new_spool_rec.weight_core = Some(empty_spool_weight);
-                    }
-                    let new_spool_rec_ext = SpoolRecordExt {
-                        tag: None,
-                        k_info: None,
-                        origin_data: Some(OriginData::BambuLabTag { bambulab_tag }),
-                    };
-
-                    let store = view_model.borrow().store.clone();
-                    let ui = view_model.borrow().ui_weak.unwrap();
-                    let ui_app_state = ui.global::<crate::app::AppState>();
-                    match store.add_spool(new_spool_rec, new_spool_rec_ext).await {
-                        Ok(new_spool_rec_id) => {
-                            info!("Added new Bambulab Spool record number {new_spool_rec_id}");
-                            view_model.borrow_mut().recently_added_spool_id = Some(new_spool_rec_id.clone());
-                            ui_app_state.invoke_import_definition_tag_to_inventory_status("".into(), new_spool_rec_id.into());
-                            // TODO: ? Display spool number on screen or in the next page
-                        }
-                        Err(err) => {
-                            // TODO: display error on screen
-                            error!("Failed to add bambulab spool record {err:?}");
-                            ui_app_state.invoke_show_message_box(
-                                "Critical Store Notice".into(),
-                                "Failed to store information from tag".into(),
-                                err.to_shared_string(),
-                                crate::app::StatusType::Error,
-                                -1,
-                            );
-                        }
-                    };
+                    (Some(bambulab_tag.to_spool_rec()), Some(OriginData::BambuLabTag { bambulab_tag }))
                 } else {
-                    error!("Internal Error, tag_definition_info doen't match");
+                    (None, None)
+                }
+            }
+            OPENPRINTTAG_TAG_TYPE => {
+                if let Ok(openprinttag_tag) = serde_json::from_str::<OpenPrintTagTag>(&tag_definition_info) {
+                    match openprinttag_tag.to_spool_rec() {
+                        Ok(spool_rec) => (Some(spool_rec), Some(OriginData::OpenPrintTagTag { openprinttag_tag })),
+                        Err(_err) => {
+                            error!("Error parsing OpenPrintTag tag");
+                            (None, None)
+                        }
+                    }
+                } else {
+                    (None, None)
                 }
             }
             _ => {
                 error!("Internal Error, unexpected tag definition type");
+                (None, None)
             }
+        };
+        if let Some(mut new_spool_rec) = spool_rec {
+            if empty_spool_weight != 0 {
+                new_spool_rec.weight_core = Some(empty_spool_weight);
+            }
+            let new_spool_rec_ext = SpoolRecordExt {
+                tag: None,
+                k_info: None,
+                origin_data,
+            };
+
+            let store = view_model.borrow().store.clone();
+            let ui = view_model.borrow().ui_weak.unwrap();
+            let ui_app_state = ui.global::<crate::app::AppState>();
+            match store.add_spool(new_spool_rec, new_spool_rec_ext).await {
+                Ok(new_spool_rec_id) => {
+                    info!("Added new Bambulab Spool record number {new_spool_rec_id}");
+                    view_model.borrow_mut().recently_added_spool_id = Some(new_spool_rec_id.clone());
+                    ui_app_state.invoke_import_definition_tag_to_inventory_status("".into(), new_spool_rec_id.into());
+                }
+                Err(err) => {
+                    error!("Failed to add bambulab spool record {err:?}");
+                    ui_app_state.invoke_show_message_box(
+                        "Critical Store Notice".into(),
+                        "Failed to store information from tag".into(),
+                        err.to_shared_string(),
+                        crate::app::StatusType::Error,
+                        -1,
+                    );
+                }
+            };
         }
     }
 
@@ -2051,7 +2077,7 @@ impl ViewModel {
                 error!("Failed to resolve filament temps for spool {spool_id}");
                 view_model.borrow().message_box(
                     "Configure Slot Notice",
-                    &format!("Failed to Resolve Temps for Spool {spool_id}"),
+                    &format!("Spool {spool_id} Missing Required Information"),
                     "",
                     crate::app::StatusType::Error,
                     0,
@@ -2448,6 +2474,9 @@ impl SpoolTagObserver for ViewModel {
                 ui.unwrap().global::<crate::app::AppState>().invoke_erasing_succeeded();
             }
             Status::ReadSuccess(read_result) => match read_result {
+                // TODO: For some reason SpoolV1 tags have precedence, not sure why.
+                // Probably becaue of the use if their internal written ID in case such exist, not sure it's good
+                // Need to remember the reason
                 spool_tag::ReadResult::NDEF { uid, message } => {
                     if let Some(ndef_bytes) = message {
                         match NdefMessage::decode(ndef_bytes) {
@@ -2468,9 +2497,6 @@ impl SpoolTagObserver for ViewModel {
                                             }
                                         }
                                     }
-                                    // if core::str::from_utf8(record.record_type()) == Ok("application/vnd.openprinttag") {
-                                    //     data = record.payload().to_vec();
-                                    // }
                                 }
                             }
                             Err(err) => error!("Error decoding NDEF data on tag {err:?}"),
@@ -2478,11 +2504,35 @@ impl SpoolTagObserver for ViewModel {
                     }
                     // not V1 tag
                     let hex_tag = hex::encode_upper(uid);
+                    // Check if it is a known tag
                     if let Some(spool_rec) = self.store.get_spool_by_hex_tag(&hex_tag) {
                         self.filament_staging.borrow_mut().set_spool_record(spool_rec, StagingOrigin::Scanned);
                         self.display_filament_staging(true);
                         let _ = self.dispatch_async_task(AppAsyncTaskRequest::SetStagingRecExt {});
                     } else {
+                        // Not known
+                        // Check if some special format
+                        if let Some(ndef_bytes) = message {
+                            if let Ok(ndef) = NdefMessage::decode(ndef_bytes) {
+                                for record in ndef.records() {
+                                    if core::str::from_utf8(record.record_type()) == Ok("application/vnd.openprinttag") {
+                                        let hex_tag = hex::encode_upper(uid);
+                                        info!("Scanned an OpenPrintTag tag");
+                                        let open_print_tag = OpenPrintTagTag::new(&hex_tag, ndef_bytes);
+                                        let open_print_tag_str = serde_json::to_string(&open_print_tag).unwrap();
+                                        let ui = self.ui_weak.clone();
+                                        ui.unwrap().global::<crate::app::AppState>().invoke_new_definition_tag_scanned(
+                                            OPENPRINTTAG_TAG_TYPE.to_shared_string(),
+                                            hex_tag.into(),
+                                            open_print_tag_str.into(),
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Unknown format, treat as an empty tag
                         let ui = self.ui_weak.unwrap();
                         let ui_app_state = ui.global::<crate::app::AppState>();
                         ui_app_state.invoke_new_tag_scanned(hex_tag.to_shared_string());

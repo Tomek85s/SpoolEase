@@ -3,7 +3,7 @@ import { NumPad } from "numpad.slint";
 import { AppBackend, AppState, ControlState, NewTagScanPage, NewTagOperation, SpoolScaleState, UiSpoolRecordDisplay, NewScannedTagType } from "app.slint";
 import { Utils } from "utils.slint";
 import { ScaleWeightDisplay } from "app-widgets.slint";
-import { SpoolDisplay } from "spool-display.slint";
+import { SpoolDisplay, SpoolDisplayMode } from "spool-display.slint";
 import { UpdateWeightPage } from "common-operations.slint";
 
 enum AddSelection {
@@ -70,9 +70,9 @@ component SpoolDefinitionTagScannedPage inherits Rectangle {
                    // Switch to SpoolDisplay to show the scanned spool information
                    if AppState.new-tag-scan-definition-type == "Bambu Lab" {
                         AppState.new-tag-scan-page = NewTagScanPage.BambulabSpoolTypeSelection;
-                   } else {
+                    } else {
                         AppState.new-tag-scan-page = NewTagScanPage.SpoolDisplay;
-                   }
+                    }
                 } else if add-selection == AddSelection.No {
                     AppState.new-tag-scan-tag-type = NewScannedTagType.SimpleTag;
                     // DON'T set the AppState.new-tag-scan-tag-definition-type, this is used for filling in the type of tag even if data in't imported
@@ -366,6 +366,7 @@ component SpoolDisplayStep inherits Rectangle {
             show-title: true;
             spool-display: root.spool-display;
             title: AppState.new-tag-scan-tag-type == NewScannedTagType.DefinitionTag ? "Spool Tag Information" : "";
+            mode: AppState.new-tag-scan-tag-type == NewScannedTagType.DefinitionTag ? SpoolDisplayMode.ImportTagDefinition : SpoolDisplayMode.Normal;
         }
 
         WizardButtons {
@@ -378,10 +379,10 @@ component SpoolDisplayStep inherits Rectangle {
                 if AppState.new-tag-scan-tag-type == NewScannedTagType.SimpleTag {
                     AppState.new-tag-scan-page = NewTagScanPage.SpoolSelect;
                 } else if AppState.new-tag-scan-tag-type == NewScannedTagType.DefinitionTag {
-                     if AppState.new-tag-scan-definition-type == "Bambu Lab" {
-                      AppState.new-tag-scan-page = NewTagScanPage.BambulabSpoolTypeSelection;
+                    if AppState.new-tag-scan-definition-type == "Bambu Lab" {
+                        AppState.new-tag-scan-page = NewTagScanPage.BambulabSpoolTypeSelection;
                     } else {
-                      AppState.new-tag-scan-page = NewTagScanPage.SpoolDefinitionTagScanned;
+                        AppState.new-tag-scan-page = NewTagScanPage.SpoolDefinitionTagScanned;
                     }
                 }
             }
@@ -398,6 +399,53 @@ component SpoolDisplayStep inherits Rectangle {
                   // (2) once completed will trigger move here to next step
                   AppBackend.import-definition-tag-to-inventory(AppState.new-tag-scan-definition-type, AppState.new-tag-scan-definition-info, AppState.new-tag-scan-empty-spool-weight);
                 }
+            }
+            cancel-clicked => {
+                AppState.control-state = ControlState.Ready;
+            }
+        }
+    }
+}
+
+component ImportDefinitionNoticePage inherits Rectangle {
+    width: 480px;
+    height: 320px;
+    VerticalLayout {
+
+        Title {
+            text: "\{AppState.new-tag-scan-definition-type} Tag Information Imported";
+        }
+        Rectangle {
+          background: white;
+
+          VerticalLayout {
+              alignment: space-around;
+              padding: 20px;
+              spacing: 5px;
+              MyText {
+                  horizontal-alignment: center;
+                  text: "Tag Information Imported to Spool \{AppState.new-tag-scan-spool-id}";
+              }
+              MyText {
+                  text: "Imported data may still be incomplete or inaccurate, and some features might not work as expected.";
+                  wrap: word-wrap;
+              }
+              MyText {
+                  text: "Please review the spool record in the inventory app and complete or correct the missing details.";
+                  wrap: word-wrap;
+              }
+          }
+
+        }
+
+
+        WizardButtons {
+            back-enabled: false;
+            next-enabled: true;
+            next-text: "Continue";
+            cancel-enabled: false;
+            next-clicked => {
+                AppState.new-tag-scan-page = NewTagScanPage.OperationSelect;
             }
             cancel-clicked => {
                 AppState.control-state = ControlState.Ready;
@@ -465,4 +513,6 @@ export component NewTagScan inherits Rectangle {
     if AppState.new-tag-scan-page == NewTagScanPage.SpoolDefinitionTagScanned: spool-definition-tag-scanned := SpoolDefinitionTagScannedPage { }
 
     if AppState.new-tag-scan-page == NewTagScanPage.BambulabSpoolTypeSelection: bambulab-spool-type-selection := BambulabSpoolTypePage { }
+
+    if AppState.new-tag-scan-page == NewTagScanPage.ImportDefinitionNotice: import-definition-notice := ImportDefinitionNoticePage { }
 }

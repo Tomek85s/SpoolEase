@@ -1,7 +1,7 @@
 use crate::{
     bambu::{KInfo, KNozzleId, NozzleType},
     csvdb::CsvDbId,
-    tag_standards::BambuLabTag,
+    tag_standards::{BambuLabTag, OpenPrintTagTag},
     types::FilamentSupInfo,
 };
 use alloc::{
@@ -84,6 +84,7 @@ pub struct SpoolRecord {
 pub enum OriginData {
     SpoolEaseV1 { uid: String, url: String },
     BambuLabTag { bambulab_tag: BambuLabTag },
+    OpenPrintTagTag { openprinttag_tag: OpenPrintTagTag },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

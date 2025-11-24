@@ -25,12 +25,18 @@ export component ViewButtons inherits HorizontalLayout {
     }
 }
 
+export enum SpoolDisplayMode {
+    Normal,
+    ImportTagDefinition,
+}
+
 export component SpoolDisplay inherits Rectangle {
     in-out property <UiSpoolRecordDisplay> spool-display;
     background: white;
     property <color> filament-color: spool-display.color;
     in property <bool> show-title: true;
     in property <string> title: "";
+    in property <SpoolDisplayMode> mode: SpoolDisplayMode.Normal;
 
     VerticalLayout {
         alignment: stretch;
@@ -56,9 +62,10 @@ export component SpoolDisplay inherits Rectangle {
             }
 
             LabeledInfo {
-                vertical-stretch: 1;
+                vertical-stretch: mode == SpoolDisplayMode.ImportTagDefinition ? 2 : 1;
                 label: "Note:";
                 text: spool-display.spool-record.note;
+                text-wrap: mode == SpoolDisplayMode.ImportTagDefinition ? word-wrap : no-wrap;
             }
 
             LabeledInfo {
@@ -82,7 +89,7 @@ export component SpoolDisplay inherits Rectangle {
                 }
             }
 
-            LabeledInfo {
+            if mode != SpoolDisplayMode.ImportTagDefinition : LabeledInfo {
                 vertical-stretch: 1;
                 label: "PA(K):";
                 text: spool-display.pa-line1;
