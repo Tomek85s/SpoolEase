@@ -947,11 +947,11 @@ impl ViewModel {
         debug!("{}", text);
     }
 
-    fn ui_erase_tag_by_spool_id(&self, spool_id: &str) {
+    fn ui_erase_tag_by_spool_id(&self, spool_id: &str) -> bool {
         if let Some(spool_rec) = self.store.get_spool_by_id(spool_id) {
             if spool_rec.has_valid_tag_id() {
                 self.ui_erase_tag(&spool_rec.tag_id);
-                return;
+                return true;
             }
         }
         error!("Received to erase spool's tag with invalid tag id");
@@ -964,15 +964,18 @@ impl ViewModel {
             crate::app::StatusType::Error,
             -1,
         );
+        false
     }
 
-    fn ui_erase_tag(&self, tag_id: &str) {
+    fn ui_erase_tag(&self, tag_id: &str) -> bool {
         if let Ok(uid) = hex::decode(tag_id) {
             let spool_tag_borrow = self.spool_tag_model.borrow();
             spool_tag_borrow.erase_tag(Some(uid.clone()), String::new());
             let _ = self.spool_scale_model.borrow().erase_tag(Some(uid), String::new());
+            true
         } else {
-            //     ui.invoke_encoding_failure("Spool Tag Id isn't valid".to_shared_string());
+            // ui.invoke_encoding_failure("Spool Tag Id isn't valid".to_shared_string());
+            false
         }
     }
 

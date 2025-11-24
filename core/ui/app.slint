@@ -151,8 +151,8 @@ export global AppBackend {
     pure callback get-slot-display(tray-id: int) -> UiSlotDisplay;
     callback can-link-spool-to-tag(id: string) -> string; // empty if untagged, error text if not
     callback add-v1-tag-to-inventory(tag_id: string, tag_descriptor: string, final-step: bool);
-    callback erase-tag(tag_id: string);
-    callback erase-tag-by-spool-id(id: string);
+    callback erase-tag(tag_id: string) -> bool;
+    callback erase-tag-by-spool-id(id: string) -> bool;
     callback untag-slot(tray-id: int);
     callback reset-slot(tray-id: int);
     callback configure-slot-with-spool-id(tray-id: int, spool-id: string);
@@ -270,6 +270,7 @@ export global AppState {
     // in-out property <StatusType> spool-inventory-dialog-type: StatusType.Normal;
 
     in-out property <int> encode-timeout: 999;
+    in-out property <int> erase-timeout: 999;
 
     in-out property <int> curr-ams-id: 0;
     in-out property <[int]> ams-exists: [0];
@@ -557,6 +558,37 @@ export global AppState {
             self.encode-timeout = 15;
             self.control-state = ControlState.Encoding;
             user-message = "Place Spool Tag\nto Encode";
+            user-message-type = StatusType.Normal;
+        }
+    }
+
+    public function erasing-timeout() {
+        self.control-state = ControlState.PostAction;
+        self.user-message = "Erasing Tag Timed Out";
+        self.user-message-type = StatusType.Error;
+
+        AppBackend.read-tag-mode();
+    }
+
+    public function erasing-cancel() {
+        AppBackend.read-tag-mode();
+        self.control-state = ControlState.Ready;
+    }
+
+    public function erase-tag-by-spool-id-start(spool-id: string) {
+        if AppBackend.erase-tag-by-spool-id(spool-id) {
+            self.erase-timeout = 15;
+            self.control-state = ControlState.Erasing;
+            user-message = "Place Spool Tag\nto Erase";
+            user-message-type = StatusType.Normal;
+        }
+    }
+
+    public function erase-tag-by-tag-id-start(tag-id: string) {
+        if AppBackend.erase-tag(tag-id) {
+            self.erase-timeout = 15;
+            self.control-state = ControlState.Erasing;
+            user-message = "Place Spool Tag\nto Erase";
             user-message-type = StatusType.Normal;
         }
     }

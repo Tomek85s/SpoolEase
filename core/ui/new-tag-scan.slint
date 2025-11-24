@@ -348,10 +348,8 @@ component V1TagPromptStep inherits Rectangle {
             next-clicked => {
                 if selected-operation == NewTagOperation.AddV1TagToInventory {
                     AppBackend.add-v1-tag-to-inventory(AppState.new-tag-scan-tag-id, AppState.new-tag-scan-definition-info, last-step);
-                    // AppState.control-state = ControlState.Ready;
                 } else {
-                    AppBackend.erase-tag(AppState.new-tag-scan-tag-id);
-                    AppState.control-state = ControlState.Ready;
+                    AppState.erase-tag-by-tag-id-start(AppState.new-tag-scan-tag-id);
                 }
             }
         }

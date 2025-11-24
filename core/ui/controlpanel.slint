@@ -259,12 +259,12 @@ export component Erasing inherits OperationBase {
     }
 
     text-border-width: text-border-timer.text-border-width;
-    button2-timeout: AppState.encode-timeout;
+    button2-timeout: AppState.erase-timeout;
     timeout-clicked2 => {
-        AppState.encoding-timeout();
+        AppState.erasing-timeout();
     }
     manual-clicked2 => {
-        AppState.encode-cancel();
+        AppState.erasing-cancel();
     }
     clicked2 => {
       // called in both cases - manual and timeout
