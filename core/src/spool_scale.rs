@@ -157,6 +157,14 @@ impl SpoolScale {
         }
     }
 
+    pub fn tags_in_store(&self, tags_in_store: String) -> Result<(), String> {
+        if let Err(err) = self.console_to_scale.try_send(ConsoleToScale::TagsInStore { tags: tags_in_store }) {
+            Err(format!("Failed sending tags_in_store to scale {err:?}"))
+        } else {
+            Ok(())
+        }
+    }
+
     // Technical Stuff  ////////////////////////
 
     pub fn process_message(&mut self, _frame_header: &FrameHeader, payload: &[u8]) {
@@ -228,7 +236,9 @@ impl SpoolScale {
             );
         }
     }
-    pub fn connected(&mut self) {
+    pub fn connected(&self) { 
+        // don't change to &mut, if changed will panic on borrow since during connect notification sending data back to scale that needs borrow
+        // one solution is to pass reference to self to the object being notified so it can use it instead of borrowing (maybe possible)
         self.notify_scale_connected();
     }
     pub fn disconnected(&mut self) {
@@ -559,7 +569,7 @@ pub async fn spool_scale_task(
 
         term_info!("Connection with SpoolScale established");
 
-        spool_scale_rc.borrow_mut().connected();
+        spool_scale_rc.borrow().connected();
 
         'send_recv_loop: loop {
             // max timeout_for_ping need to be less than above WithTimeout wrapper
@@ -763,7 +773,10 @@ pub async fn spool_scale_task(
                                             let res = socket.flush().await;
                                             match res {
                                                 Ok(_) => {
-                                                    debug!("SpoolScale: Sent message to scale: {json}");
+                                                    // log at most 200 characters
+                                                    let idx = json.char_indices().nth(200).map(|(i, _)| i).unwrap_or(json.len());
+                                                    let str_to_print: &str = &json[..idx];
+                                                    debug!("SpoolScale: Sent message to scale: {str_to_print}");
                                                 }
                                                 Err(send_to_scale_flush_err) => {
                                                     error!("SpoolScale: Error sending message payload {send_to_scale_flush_err:?}, disconnecting");

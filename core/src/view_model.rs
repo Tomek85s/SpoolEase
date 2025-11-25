@@ -2477,6 +2477,18 @@ impl SpoolTagObserver for ViewModel {
                 // TODO: For some reason SpoolV1 tags have precedence, not sure why.
                 // Probably becaue of the use if their internal written ID in case such exist, not sure it's good
                 // Need to remember the reason
+                spool_tag::ReadResult::TagInStore { uid } => {
+                    // Handling of tag in store, same as below
+                    debug!("Scanned Tag which is in store");
+                    let hex_tag = hex::encode_upper(uid);
+                    if let Some(spool_rec) = self.store.get_spool_by_hex_tag(&hex_tag) {
+                        self.filament_staging.borrow_mut().set_spool_record(spool_rec, StagingOrigin::Scanned);
+                        self.display_filament_staging(true);
+                        let _ = self.dispatch_async_task(AppAsyncTaskRequest::SetStagingRecExt {});
+                    } else {
+                        error!("Tag scanned as in store, not found in store");
+                    }
+                },
                 spool_tag::ReadResult::NDEF { uid, message } => {
                     if let Some(ndef_bytes) = message {
                         match NdefMessage::decode(ndef_bytes) {
@@ -2506,6 +2518,8 @@ impl SpoolTagObserver for ViewModel {
                     let hex_tag = hex::encode_upper(uid);
                     // Check if it is a known tag
                     if let Some(spool_rec) = self.store.get_spool_by_hex_tag(&hex_tag) {
+                        debug!("Scanned Tag which is in store");
+                        // Handling of tag in store, same as above
                         self.filament_staging.borrow_mut().set_spool_record(spool_rec, StagingOrigin::Scanned);
                         self.display_filament_staging(true);
                         let _ = self.dispatch_async_task(AppAsyncTaskRequest::SetStagingRecExt {});
@@ -2578,6 +2592,10 @@ impl SpoolTagObserver for ViewModel {
         info!("Emulated tag scanned");
         let ui = self.ui_weak.clone();
         ui.unwrap().global::<crate::app::AppState>().invoke_emulated_tag_scanned();
+    }
+
+    fn is_tag_in_store(&mut self, tag_id: &[u8]) -> bool {
+        self.store.exists_tag_id(tag_id)
     }
 }
 
@@ -2784,6 +2802,7 @@ impl SpoolScaleObserver for ViewModel {
     fn on_scale_connected(&mut self) {
         debug!("Scale connected");
         self.ui_weak.unwrap().global::<crate::app::AppState>().invoke_spool_scale_connected();
+        let _ = self.spool_scale_model.borrow().tags_in_store(self.store.tags_in_store());
     }
 
     fn on_scale_disconnected(&mut self) {
@@ -2856,7 +2875,17 @@ impl SpoolScaleObserver for ViewModel {
     }
 }
 
-impl StoreObserver for ViewModel {}
+impl StoreObserver for ViewModel {
+    fn on_tag_added(&self) {
+        let tags_in_store = self.store.tags_in_store();
+        let _ = self.spool_scale_model.borrow().tags_in_store(tags_in_store);
+    }
+
+    fn on_tag_removed(&self) {
+        let tags_in_store = self.store.tags_in_store();
+        let _ = self.spool_scale_model.borrow().tags_in_store(tags_in_store);
+    }
+}
 
 fn get_brand_from_text(text: &str) -> Option<&'static str> {
     let text = text.to_lowercase();

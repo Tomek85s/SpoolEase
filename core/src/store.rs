@@ -184,7 +184,7 @@ impl Store {
         let deleted_record = if let Some(spools_db) = &self.spools_db.get() {
             let delete_res = spools_db.delete(id).await;
             if let Ok(Some(record)) = &delete_res {
-                self.tag_id_index.borrow_mut().remove(&record.tag_id);
+                self.remove_tag_from_tag_id_index(&record.tag_id);
             }
             delete_res.context(CsvDbSnafu)?
         } else {
@@ -201,6 +201,24 @@ impl Store {
             }
         }
         Ok(())
+    }
+
+    pub fn remove_tag_from_tag_id_index(&self, tag_id: &str) -> Option<String> {
+       let res = self.tag_id_index.borrow_mut().remove(tag_id);
+        for weak_observer in self.observers.borrow().iter() {
+            let observer = weak_observer.upgrade().unwrap();
+            observer.borrow().on_tag_removed();
+        }
+       res
+    }
+
+    pub fn insert_tag_to_tag_id_index(&self, tag_id: String, spool_id: String ) -> Option<String> {
+        let res = self.tag_id_index.borrow_mut().insert(tag_id, spool_id);
+        for weak_observer in self.observers.borrow().iter() {
+            let observer = weak_observer.upgrade().unwrap();
+            observer.borrow().on_tag_added();
+        }
+       res
     }
 
     pub async fn add_spool(&self, mut spool_rec: SpoolRecord, spool_rec_ext: SpoolRecordExt) -> Result<String, StoreError> {
@@ -223,7 +241,7 @@ impl Store {
                         } else {
                             Ok(())
                         };
-                        self.tag_id_index.borrow_mut().insert(tag_id, id);
+                        self.insert_tag_to_tag_id_index(tag_id, id);
                         update_res
                     } else {
                         Ok(())
@@ -316,6 +334,16 @@ impl Store {
         self.exists_hex_tag_id(&hex::encode_upper(tag_id))
     }
 
+    pub fn tags_in_store(&self) -> String {
+        let mut tags_in_store = String::with_capacity(self.tag_id_index.borrow().len() * (7+1) + 1);
+        tags_in_store.push(','); // start with ","
+        for tag in self.tag_id_index.borrow().keys() {
+            tags_in_store.push_str(tag);
+            tags_in_store.push(',');
+        }
+        tags_in_store
+    }
+
     pub fn get_spool_by_id(&self, id: &str) -> Option<SpoolRecord> {
         if let Some(spools_db) = self.spools_db.get() {
             if let Some(current_rec) = spools_db.records.borrow().get(id) {
@@ -374,7 +402,7 @@ impl Store {
                                 spools_db.insert(existing_spool_rec_with_tag_id).await.context(CsvDbSnafu)?;
                             }
                         }
-                        self.tag_id_index.borrow_mut().insert(tag_id, id);
+                        self.insert_tag_to_tag_id_index(tag_id, id);
                     } else {
                         // for some reason tag_id was removed
                         let tag_id = self
@@ -384,7 +412,7 @@ impl Store {
                             .find(|(_, index_id)| *index_id == &id)
                             .map(|(index_tag, _)| index_tag.clone());
                         if let Some(tag_id) = tag_id {
-                            self.tag_id_index.borrow_mut().remove(&tag_id);
+                            self.remove_tag_from_tag_id_index(&tag_id);
                         }
                     }
                     Ok(ret_spool_rec_ext)
@@ -841,6 +869,8 @@ pub async fn store_task(framework: Rc<RefCell<Framework>>, store: Rc<Store>, vie
 }
 
 pub trait StoreObserver {
+    fn on_tag_added(&self);
+    fn on_tag_removed(&self);
     // fn on_read_spool_record_ext(&mut self, result: Result<SpoolRecordExt, String>);
 }
 

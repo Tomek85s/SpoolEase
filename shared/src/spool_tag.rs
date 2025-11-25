@@ -14,7 +14,7 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use framework::prelude::*;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, hex::Hex};
+use serde_with::{hex::Hex, serde_as};
 
 use crate::{
     ndef,
@@ -36,6 +36,7 @@ pub trait SpoolTagObserver {
     fn on_tag_status(&mut self, status: &Status);
     fn on_pn532_status(&mut self, status: bool);
     fn on_emulated_tag_read(&mut self);
+    fn is_tag_in_store(&mut self, tag_id: &[u8]) -> bool;
 }
 
 impl SpoolTag {
@@ -89,6 +90,16 @@ impl SpoolTag {
             observer.borrow_mut().on_pn532_status(status);
         }
     }
+    pub fn is_tag_in_store(&self, tag_uid: &[u8]) -> bool {
+        // can check with only one observer so checking first
+        if let Some(weak_observer) = self.observers.first() {
+            let observer = weak_observer.upgrade().unwrap();
+            let res = observer.borrow_mut().is_tag_in_store(tag_uid);
+            res
+        } else {
+            false
+        }
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -132,6 +143,10 @@ pub enum Failure {
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ReadResult {
+    TagInStore {
+        #[serde_as(as = "Hex")]
+        uid: Vec<u8>,
+    },
     NDEF {
         #[serde_as(as = "Hex")]
         uid: Vec<u8>,
@@ -517,7 +532,13 @@ async fn nfc_task(
                                 .borrow()
                                 .notify_tag_status(Status::FoundTagNowReading);
                             let mut final_read_result = None;
-                            if nfc_tag_type == NfcTagType::NTAG {
+                            // if spool_tag_rc.borrow().tag_operation.
+
+                            if spool_tag_rc.borrow().is_tag_in_store(uid.uid()) {
+                                final_read_result = Some(ReadResult::TagInStore {
+                                    uid: uid.uid().to_vec(),
+                                });
+                            } else if nfc_tag_type == NfcTagType::NTAG {
                                 let ntag_res = match crate::nfc::read_ndef_payload(
                                     &mut pn532,
                                     Duration::from_millis(2000),

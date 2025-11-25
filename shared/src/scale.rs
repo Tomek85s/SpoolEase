@@ -85,4 +85,7 @@ pub enum ConsoleToScale {
         ota_toml_filename: String,
         ota_cert: String,
     },
+    TagsInStore {
+        tags: String,
+    }
 }
