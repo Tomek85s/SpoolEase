@@ -1778,6 +1778,10 @@ impl BambuPrinter {
     }
 
     pub fn fetch_filament_calibrations(&self, nozzle_diameter: &str) {
+        // Is this command also causing errors when printer is locked?
+        // if self.is_locked() {
+        //     return;
+        // }
         let cmd = crate::bambu_api::ExtrusionCaliGetCommand::new(nozzle_diameter);
         let payload = serde_json::to_string_pretty(&cmd).unwrap();
         self.publish_payload(payload);
