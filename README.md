@@ -3,13 +3,18 @@
 SpoolEase is a smart add-on system for Bambu Lab 3D printers that adds intelligence and control to every filament spool.
 
 It features:
-- NFC tags for automatic spool identification
-- A complete spool inventory management system - keeping your spools organized
-- Precise filament tracking using (1) weight scale, (2) print usage monitoring, and (3) a smart workflow - so you can tell how much filament is available in every spool
-- Automatic slot configuration fot material, color, pressure advance (K)
-- A Virtual Spool Tag for viewing spool info on your mobile device
+- NFC tags for automatic spool identification (see below supported tags and formats)
+- Complete spool inventory management system - keep your spools organized
+- Precise dual method filament tracking using (1) weight scale, (2) print usage monitoring, combined with a very streamlined workflow - so you can tell how much filament is available in every spool
+- Automatic slot configuration fot material, color, pressure advance (K) - simplify printing and reduce errors
+- Virtual Spool Label for viewing spool info on your mobile device
 - Compatibility with your slicer filament settings
 - Serves as backup for your pressure advance settings (for when the printer loses them — and yes, it happens)
+
+- Supports most common NFC tags - NTAG (recommended 215 and above) and Mifare (no support yet for virtual label feature)
+- Supports data import from and use of Bambu Lab filament RFID tags
+- Supports data import from and use of [OpenPrintTag](https://openprinttag.org/)
+- Supports Bambu Lab X1, P1, A1, H2, P2 product lines with AMS-Lite, AMS, AMS2-Pro and AMS-HT
 - More ...
 
 The system includes two products:  
@@ -67,9 +72,9 @@ And most importantly, even though it’s an open-source project, it’s fun and 
 
 ## Collaboration
 
+- For discussions, support and general discussions best to join SpoolEase [Discord Server](https://discord.gg/6brKUCERcQ)
 - For questions, feedback, comments, etc. please use the [Repo discussions area](https://github.com/yanshay/SpoolEase/discussions)
 - For getting notified on important updates, subscribe to the [Announcements Discussion](https://github.com/yanshay/SpoolEase/discussions/7)
-- If you want to try your luck with immediate online response, try the [Discord Server](https://discord.gg/6brKUCERcQ)
 - It would be real cool if you post your build in the [Introduce Your Build Discussion](https://github.com/yanshay/SpoolEase/discussions/8)
 
 **I’d also greatly appreciate it if you could star SpoolEase GitHub repo.**
