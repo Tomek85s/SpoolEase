@@ -1052,7 +1052,9 @@ impl BambuPrinter {
     }
 
     fn get_common_tray_active(active_extruder: usize, extruder_tray_now: i32) -> Option<i32> {
-        if extruder_tray_now == 254 {
+        if extruder_tray_now == 255 {
+            None
+        } else if extruder_tray_now == 254 {
             if active_extruder == 0 {
                 Some(255)
             } else {
@@ -1295,10 +1297,10 @@ impl BambuPrinter {
             if let Ok(fun) = u64::from_str_radix(fun, 16) {
                 if fun & 0x20000000 != 0 {
                     // locked mode
-                    // self.locked_mode = Some(true)
+                    self.locked_mode = Some(true)
                 } else {
                     // dev mode
-                    // self.locked_mode = Some(false)
+                    self.locked_mode = Some(false)
                 }
             }
         }
