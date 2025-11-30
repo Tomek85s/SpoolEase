@@ -13,7 +13,6 @@ It features:
 
 - Supports most common NFC tags - NTAG (recommended 215 and above) and Mifare Classic (with Mifare no support yet for virtual label feature)
 - Supports data import from and use of Bambu Lab filament RFID tags
-- Supports data import from and use of [OpenPrintTag](https://openprinttag.org/)
 - Supports Bambu Lab X1, P1, A1, H2, P2 product lines with AMS-Lite, AMS, AMS2-Pro and AMS-HT
 - More ...
 
