@@ -581,9 +581,10 @@ impl BambuPrinter {
             let tray_read_done_bits_dirty = printer.borrow().tray_read_done_bits_dirty;
             let calibrations_dirty = printer.borrow().calibrations_dirty;
             let printer_name_dirty = printer.borrow().printer_name_dirty;
+            let relevant_extruder_state_dirty = printer.borrow().relevant_extruder_state_dirty;
 
-            printer.borrow_mut().virt_trays_dirty = false;
             printer.borrow_mut().ams_trays_dirty.fill(false);
+            printer.borrow_mut().virt_trays_dirty = false;
             printer.borrow_mut().extruders_dirty = false;
             printer.borrow_mut().ams_exist_bits_dirty = false;
             printer.borrow_mut().tray_exist_bits_dirty = false;
@@ -591,6 +592,7 @@ impl BambuPrinter {
             printer.borrow_mut().calibrations_dirty = false;
             printer.borrow_mut().printer_name_dirty = false;
             printer.borrow_mut().force_store_state = false;
+            printer.borrow_mut().relevant_extruder_state_dirty = false;
             let mut file_store = file_store.lock().await;
 
             let undo_store = |code: i32| {
@@ -605,6 +607,7 @@ impl BambuPrinter {
                 printer_borrow.tray_read_done_bits_dirty |= tray_read_done_bits_dirty;
                 printer_borrow.calibrations_dirty |= calibrations_dirty;
                 printer_borrow.printer_name_dirty |= printer_name_dirty;
+                printer_borrow.relevant_extruder_state_dirty |= relevant_extruder_state_dirty; 
                 printer_borrow.force_store_state = true; // is is set to true in case we miss something or forget in the future
                 view_model.borrow().message_box(
                     &format!("State Store Error ({code})"),
