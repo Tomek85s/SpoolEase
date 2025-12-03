@@ -768,12 +768,15 @@ impl BambuPrinter {
 
         let consume_index_path = printer.borrow().printer_state_path_for_file(&format!("print.ci{}", consume_store_counter%2));
         let file_store = framework.borrow().file_store();
+        debug!(">>>>> file_store.lock()");
         let mut file_store = file_store.lock().await;
+        debug!(">>>>> file_store.create_write_file_str()");
         if let Err(err) = file_store.create_write_file_str(&consume_index_path, &consume_index_state_str).await {
             let err_str = format!("[{printer_log_id}] Error Writing Consume Index File");
             error!("{err_str} : {err:?}");
             return Err(err_str);
         }
+        debug!(">>>> file_store.create_write_file_str() completed successfuly");
        Ok(()) 
     }
 
