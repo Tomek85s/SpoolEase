@@ -411,15 +411,15 @@ pub async fn generic_mqtt_task<
                 port
             );
         } else {
-            info!(
-                "[{}] Connecting to Printer at {}.{}.{}.{}:{}",
-                printer_log_id,
-                octets[0],
-                octets[1],
-                octets[2],
-                octets[3],
-                port
-            );
+            // info!(
+            //     "[{}] Connecting to Printer at {}.{}.{}.{}:{}",
+            //     printer_log_id,
+            //     octets[0],
+            //     octets[1],
+            //     octets[2],
+            //     octets[3],
+            //     port
+            // );
         }
 
         match socket.connect(remote_endpoint).await {
@@ -435,7 +435,7 @@ pub async fn generic_mqtt_task<
                     term_error!("[{}] Unexpected error connecting socket, will retry {:?}", printer_log_id, e);
                 } else {
                     // to log we want every time
-                    error!("[{}] Unexpected error connecting socket, will retry {:?}", printer_log_id, e);
+                    //error!("[{}] Unexpected error connecting socket, will retry {:?}", printer_log_id, e);
                 }
                 socket_error_count += 1;
                 Timer::after(Duration::from_millis(2000)).await;
