@@ -29,14 +29,6 @@ export struct UiTray {
   spool_rec_id: string,
 }
 
-export struct UiSpoolInfo {
-  id: string,
-  color: color,
-  material: string,
-  k: string,
-  weight-core: int,
-}
-
 export struct UiSpoolRecord {
     id: string,
     tag_id: string,
@@ -67,6 +59,7 @@ export struct UiSpoolRecordDisplay {
   temp-max: int,
   pa-line1: string,
   pa-line2: string,
+  weight-left: string,
 }
 
 export struct UiSlotDisplay {
@@ -259,7 +252,7 @@ export global AppState {
     in-out property <int> tray-selected-tray-index: -1;
 
     in-out property <SpoolStagingState> spool-staging-state: SpoolStagingState.Empty;
-    in-out property <UiSpoolInfo> spool-staging-info;
+    in-out property <UiSpoolRecordDisplay> spool-staging-info;
     in-out property <int> staging-to-tray: -1; // tray that needs to be updated with filament when recognizing on backend tray is reading
     in-out property <bool> reset-staging-countdown: false;
 
@@ -401,7 +394,7 @@ export global AppState {
             self.user-message-type = StatusType.Error;
         }
     }
-    public function read-tag-succeeded(ui-spool-info: UiSpoolInfo, final-step: bool) {
+    public function read-tag-succeeded(ui-spool-info: UiSpoolRecordDisplay, final-step: bool) {
         self.spool-staging-state = SpoolStagingState.Scanned;
         self.spool-staging-info = ui-spool-info;
         self.user-message = "Tag Scanned to Staging";
@@ -412,7 +405,7 @@ export global AppState {
         }
     }
 
-    public function tag-unloaded(ui-spool-info: UiSpoolInfo) {
+    public function tag-unloaded(ui-spool-info: UiSpoolRecordDisplay) {
         self.spool-staging-state = SpoolStagingState.Unloaded;
         self.spool-staging-info = ui-spool-info;
         self.control-state = ControlState.PostAction;
@@ -421,7 +414,7 @@ export global AppState {
         start-highlight-tray(999);
     }
 
-    public function update-spool-staging(ui-spool-info: UiSpoolInfo, state: SpoolStagingState) {
+    public function update-spool-staging(ui-spool-info: UiSpoolRecordDisplay, state: SpoolStagingState) {
         self.spool-staging-info = ui-spool-info;
         if state != SpoolStagingState.Unchanged {
             self.spool-staging-state = state;
@@ -438,7 +431,8 @@ export global AppState {
 
     public function empty-spool-staging() {
         self.spool-staging-state = SpoolStagingState.Empty;
-        self.spool-staging-info.weight-core = 0;
+        self.spool-staging-info = {};
+        // self.spool-staging-info.spool-record.weight-core = 0;
     }
 
     public function spool-loaded-when-staging-loaded() {

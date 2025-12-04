@@ -11,8 +11,8 @@ export component ScaleWeightDisplay inherits Rectangle {
     in-out property <bool> stable-weight: AppState.spool-scale-state == SpoolScaleState.Loaded && AppState.spool-scale-weight-stable;
     function weight-display() -> string {
         if weight-display-content == WeightDisplayContent.NetGross {
-            if AppState.spool-staging-state != SpoolStagingState.Empty && AppState.spool-staging-info.weight-core != 0 {
-                return "\{AppState.spool-scale-weight - AppState.spool-staging-info.weight-core}g / \{AppState.spool-scale-weight}g";
+            if AppState.spool-staging-state != SpoolStagingState.Empty && AppState.spool-staging-info.spool-record.weight-core != 0 {
+                return "\{AppState.spool-scale-weight - AppState.spool-staging-info.spool-record.weight-core}g / \{AppState.spool-scale-weight}g";
             } else {
                 return "\{AppState.spool-scale-weight}g";
             }

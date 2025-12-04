@@ -95,14 +95,14 @@ component OperationSelectionStep inherits Rectangle {
                 MyButton {
                     text: "Unlink Tag";
                     clicked => {
-                        AppBackend.unlink-spool-from-tag(AppState.spool-staging-info.id)
+                        AppBackend.unlink-spool-from-tag(AppState.spool-staging-info.spool-record.id)
                     }
                 }
 
                 MyButton {
                     text: "Erase Tag";
                     clicked => {
-                        AppState.erase-tag-by-spool-id-start(AppState.spool-staging-info.id)
+                        AppState.erase-tag-by-spool-id-start(AppState.spool-staging-info.spool-record.id)
                     }
                 }
             }
@@ -137,7 +137,7 @@ component OperationSelectionStep inherits Rectangle {
 }
 
 export component StagingOperations {
-    property <UiSpoolRecordDisplay> spool-display: AppBackend.get-spool-record-display(AppState.spool-staging-info.id);
+    property <UiSpoolRecordDisplay> spool-display: AppBackend.get-spool-record-display(AppState.spool-staging-info.spool-record.id);
     if AppState.staging-operation-page == StagingOperationsPage.SpoolDisplay: SpoolDisplayStep {
         spool-display: spool-display;
     }

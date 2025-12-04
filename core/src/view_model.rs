@@ -1096,7 +1096,13 @@ impl ViewModel {
                         Ok(spool_rec) => spool_rec,
                         Err(_err) => {
                             error!("Error parsing OpenPrintTag tag");
-                            return UiSpoolRecordDisplay { spool_record: UiSpoolRecord { note: "Error parsing OpenPrintTag tag".into(), ..Default::default() }, ..Default::default() };
+                            return UiSpoolRecordDisplay {
+                                spool_record: UiSpoolRecord {
+                                    note: "Error parsing OpenPrintTag tag".into(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            };
                         }
                     }
                 } else {
@@ -1166,6 +1172,16 @@ impl ViewModel {
             return UiSpoolRecordDisplay::default();
         }
         let spool_rec = spool_rec.unwrap();
+
+        let weight_left = self.weight_left_spool(&spool_rec, 0.0);
+        let weight_left = weight_left.map_or_else(String::new, |f| format!("{:.1}", f));
+        let weight_left = weight_left.trim_end_matches('0').trim_end_matches('.');
+        let weight_left = if weight_left.is_empty() {
+            SharedString::new()
+        } else {
+            slint::format!("{}g", weight_left)
+        };
+
         let record = UiSpoolRecord {
             added_full: spool_rec.added_full.unwrap_or_default(),
             // added_time: todo!(),
@@ -1218,52 +1234,16 @@ impl ViewModel {
             temp_min,
             temp_max,
             color,
+            weight_left,
         }
     }
 
     fn tag_info_to_ui_spool_info_direct(
         &self,
-        bambu_printer_borrow: &BambuPrinter,
+        _bambu_printer_borrow: &BambuPrinter,
         full_spool_rec: &Option<FullSpoolRecord>,
-    ) -> Option<crate::app::UiSpoolInfo> {
-        let full_spool_rec = full_spool_rec.as_ref()?;
-        let spool_rec = &full_spool_rec.spool_rec;
-
-        let color = if full_spool_rec.spool_rec.color_code.len() >= 6 {
-            u32::from_str_radix(&spool_rec.color_code[..6], 16).unwrap() + 0xFF000000
-        // the plus 0xFF at the end is fo add alpha
-        } else {
-            0x00FFFFFF
-        };
-
-        let mut ui_spool_info = crate::app::UiSpoolInfo {
-            id: spool_rec.id.clone().to_shared_string(),
-            color: slint::Color::from_argb_encoded(color),
-            // k: SharedString::from(final_k),
-            k: SharedString::new(),
-            material: spool_rec.material_type.to_shared_string(),
-            weight_core: spool_rec.weight_core.unwrap_or_default(),
-        };
-
-        if full_spool_rec.spool_rec_ext.k_info.is_some() {
-            // we might get here without k_info first until it is fetched, no need to search for calibration in such case
-            // we show only one K in staging, so show extruder 0 and if no value try extruder 1
-            let mut calibration = bambu_printer_borrow.get_matching_printer_calibration_for_extruder(full_spool_rec, 0);
-            if calibration.is_none() && bambu_printer_borrow.num_extruders() == 2 {
-                calibration = bambu_printer_borrow.get_matching_printer_calibration_for_extruder(full_spool_rec, 1);
-            }
-            if let Some(calibration) = calibration {
-                ui_spool_info.k = calibration.k_value.into();
-            } else if full_spool_rec.spool_rec_ext.k_info.is_some() {
-                ui_spool_info.k = "N/A".into()
-            } else {
-                ui_spool_info.k = "".into();
-            }
-        } else {
-            ui_spool_info.k = "".into();
-        }
-
-        Some(ui_spool_info)
+    ) -> Option<crate::app::UiSpoolRecordDisplay> {
+        full_spool_rec.as_ref().map(|full_spool_rec| self.ui_get_spool_record_display(&full_spool_rec.spool_rec.id.to_shared_string()))
     }
 
     fn update_ui_from_printer(&self, bambu_printer: &BambuPrinter) {
@@ -1354,19 +1334,20 @@ impl ViewModel {
 
     fn weight_left(&self, tray: &Tray) -> Option<f32> {
         // OPT: don'e access spool_rec, cache required data in meta_info / cache all spool_rec and update on changes in store using events
+        let spool_id = tray.meta_info.spool_id.as_ref()?;
+        let spool = self.store.get_spool_by_id(spool_id)?;
+        self.weight_left_spool(&spool, tray.meta_info.consumed_since_weight)
+    }
+
+    fn weight_left_spool(&self, spool: &SpoolRecord, consumed_since_weight: f32) -> Option<f32> {
         let mut weight_left = None;
-        if let Some(spool_id) = &tray.meta_info.spool_id {
-            if let Some(spool) = self.store.get_spool_by_id(spool_id) {
-                if let (Some(weight_core), Some(weight_current)) = (spool.weight_core, spool.weight_current) {
-                    let realtime_weight = (weight_current - weight_core) as f32 - tray.meta_info.consumed_since_weight;
-                    weight_left = Some(realtime_weight);
-                } else if let (Some(weight_current), Some(weight_new), Some(weight_advertised)) =
-                    (spool.weight_current, spool.weight_new, spool.weight_advertised)
-                {
-                    let realtime_weight = (weight_current - (weight_new - weight_advertised)) as f32 - tray.meta_info.consumed_since_weight;
-                    weight_left = Some(realtime_weight);
-                }
-            }
+        let weight_current = spool.weight_current?;
+        if let Some(weight_core) = spool.weight_core {
+            let realtime_weight = (weight_current - weight_core) as f32 - consumed_since_weight;
+            weight_left = Some(realtime_weight);
+        } else if let (Some(weight_new), Some(weight_advertised)) = (spool.weight_new, spool.weight_advertised) {
+            let realtime_weight = (weight_current - (weight_new - weight_advertised)) as f32 - consumed_since_weight;
+            weight_left = Some(realtime_weight);
         }
         weight_left
     }
@@ -2488,7 +2469,7 @@ impl SpoolTagObserver for ViewModel {
                     } else {
                         error!("Tag scanned as in store, not found in store");
                     }
-                },
+                }
                 spool_tag::ReadResult::NDEF { uid, message } => {
                     if let Some(ndef_bytes) = message {
                         match NdefMessage::decode(ndef_bytes) {
