@@ -113,7 +113,7 @@ export component ControlPanelBase inherits HorizontalLayout {
             VerticalLayout {
                 alignment: center;
                 for message-text in message-lines: Window {
-                    preferred-height: 30px;
+                    preferred-height: message-text == "" ? 0px : 30px;
                     if message-text != "": Text {
                         horizontal-alignment: center;
                         font-size: 20px;
