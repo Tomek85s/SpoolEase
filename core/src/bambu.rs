@@ -1710,7 +1710,11 @@ impl BambuPrinter {
                     if [GcodeState::RUNNING, GcodeState::PREPARE, GcodeState::PAUSE].contains(&gcode_state) {
                         if let Some(project_id) = print.project_id.clone() {
                             if loaded_project_id == project_id {
-                                self.curr_print_project = self.loaded_print_project.take();
+                                let print_project = self.loaded_print_project.take();
+                                if let Some(print) = &print_project {
+                                    self.update_trays_from_print_job(print);
+                                }
+                                self.curr_print_project = print_project;
                                 info!("[{}] Resume tracking print project id {}", self.printer_number, loaded_project_id);
                             } else {
                                 info!(

@@ -204,39 +204,41 @@ impl BambuPrinter {
                     job_number,
                 };
             }
+
+            self.update_trays_from_print_job(&curr_print_project);
+            changed = true;
+
             self.curr_print_project = Some(curr_print_project);
-
-            // set trays used in print, but first clear all
-
-            for tray_id in (0..self.ams_trays().len()).chain([254, 255])  {
-                self.update_any_tray(tray_id, |tray| tray.meta_info.used_in_print = false);
-            }
-
-            for tray_id in ams_mapping {
-                let tray_id = *tray_id as usize;
-                if (0..self.ams_trays().len()).contains(&tray_id) {
-                    self.update_ams_tray(tray_id, |tray| tray.meta_info.used_in_print = true);
-                    changed = true;
-                }
-            }
-
-            if let Some(ams_mapping2) = &print.ams_mapping2 {
-                for ams2_info in ams_mapping2 {
-                    if ams2_info.ams_id == 255 && ams2_info.slot_id == 0 {
-                        self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = true);
-                        changed = true;
-                    } else if ams2_info.ams_id == 254 && ams2_info.slot_id == 0 {
-                        self.update_virt_tray(1, |tray| tray.meta_info.used_in_print = true);
-                        changed = true;
-                    } 
-                }
-            } else if use_ams == Some(false) {
-                self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = true);
-                changed = true;
-            }
+            
         }
 
         changed
+    }
+
+    pub fn update_trays_from_print_job(&mut self, print: &PrintProject) {
+        // set trays used in print, but first clear all
+        for tray_id in (0..self.ams_trays().len()).chain([254, 255])  {
+            self.update_any_tray(tray_id, |tray| tray.meta_info.used_in_print = false);
+        }
+
+        for tray_id in &print.ams_mapping {
+            let tray_id = *tray_id as usize;
+            if (0..self.ams_trays().len()).contains(&tray_id) {
+                self.update_ams_tray(tray_id, |tray| tray.meta_info.used_in_print = true);
+            }
+        }
+        if let Some(ams_mapping2) = &print.ams_mapping2 {
+            for ams2_info in ams_mapping2 {
+                if ams2_info.ams_id == 255 && ams2_info.slot_id == 0 {
+                    self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = true);
+                } else if ams2_info.ams_id == 254 && ams2_info.slot_id == 0 {
+                    self.update_virt_tray(1, |tray| tray.meta_info.used_in_print = true);
+                } 
+                // TODO: not filling standard trays from ams_mapping2, maybe should for future removal of ams_mapping?
+            }
+        } else if print.use_ams == Some(false) {
+            self.update_virt_tray(0, |tray| tray.meta_info.used_in_print = true);
+        }
     }
 
     #[allow(non_snake_case)]
