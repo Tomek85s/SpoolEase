@@ -1173,7 +1173,7 @@ impl ViewModel {
         }
         let spool_rec = spool_rec.unwrap();
 
-        let weight_left = self.weight_left_spool(&spool_rec, 0.0);
+        let weight_left = self.weight_left_spool(&spool_rec, None);
         let weight_left = weight_left.map_or_else(String::new, |f| format!("{:.1}", f));
         let weight_left = weight_left.trim_end_matches('0').trim_end_matches('.');
         let weight_left = if weight_left.is_empty() {
@@ -1336,12 +1336,13 @@ impl ViewModel {
         // OPT: don'e access spool_rec, cache required data in meta_info / cache all spool_rec and update on changes in store using events
         let spool_id = tray.meta_info.spool_id.as_ref()?;
         let spool = self.store.get_spool_by_id(spool_id)?;
-        self.weight_left_spool(&spool, tray.meta_info.consumed_since_weight)
+        self.weight_left_spool(&spool, Some(tray.meta_info.consumed_since_weight))
     }
 
-    fn weight_left_spool(&self, spool: &SpoolRecord, consumed_since_weight: f32) -> Option<f32> {
+    fn weight_left_spool(&self, spool: &SpoolRecord, consumed_since_weight_override: Option<f32>) -> Option<f32> {
         let mut weight_left = None;
         let weight_current = spool.weight_current?;
+        let consumed_since_weight = consumed_since_weight_override.unwrap_or(spool.consumed_since_weight);
         if let Some(weight_core) = spool.weight_core {
             let realtime_weight = (weight_current - weight_core) as f32 - consumed_since_weight;
             weight_left = Some(realtime_weight);
