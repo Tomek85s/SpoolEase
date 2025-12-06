@@ -146,6 +146,9 @@ pub struct PrintData {
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrintDevice {
     pub extruder: Option<PrintDeviceExtruder>,
+    // ignore failure to parse due to X1C fw 01.08.02.00 (last before authorization) 
+    // that has nozzle but completely different than H2D and not in use for X1C
+    #[serde(default, deserialize_with = "ignore_errors")] 
     pub nozzle: Option<PrintDeviceNozzle>,
 }
 
@@ -474,6 +477,14 @@ where
     opt.as_deref()
         .map(|s| u32::from_str_radix(s, 16).map_err(serde::de::Error::custom))
         .transpose()
+}
+
+fn ignore_errors<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(T::deserialize(deserializer).ok())
 }
 
 // "print": {
