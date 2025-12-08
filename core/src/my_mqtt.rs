@@ -400,7 +400,7 @@ pub async fn generic_mqtt_task<
         let embassy_net::IpAddress::Ipv4(addr) = endpoint.addr else { todo!() }; // Ipv6 should not happen
         let octets = addr.octets();
 
-        if socket_error_count % 5 == 0 {
+        if socket_error_count % (15*5) == 0 {
             term_info!(
                 "[{}] Connecting to Printer at {}.{}.{}.{}:{}",
                 printer_log_id,
@@ -410,16 +410,16 @@ pub async fn generic_mqtt_task<
                 octets[3],
                 port
             );
-        } else {
-            // info!(
-            //     "[{}] Connecting to Printer at {}.{}.{}.{}:{}",
-            //     printer_log_id,
-            //     octets[0],
-            //     octets[1],
-            //     octets[2],
-            //     octets[3],
-            //     port
-            // );
+        } else if socket_error_count % 15 == 0 {
+            info!(
+                "[{}] Connecting to Printer at {}.{}.{}.{}:{}",
+                printer_log_id,
+                octets[0],
+                octets[1],
+                octets[2],
+                octets[3],
+                port
+            );
         }
 
         match socket.connect(remote_endpoint).await {
@@ -431,11 +431,11 @@ pub async fn generic_mqtt_task<
                 //     ConnectError::TimedOut => (),
                 //     ConnectError::NoRoute => (),
                 // }
-                if socket_error_count % 5 == 0 {
-                    term_error!("[{}] Error connecting to {remote_endpoint:?}, will retry {:?}", printer_log_id, e);
-                } else {
+                if socket_error_count % (15*5) == 0 {
+                    term_error!("[{}] Error connecting to {remote_endpoint:?}, will retry ({:?})", printer_log_id, e);
+                } else if socket_error_count % 15 == 0{
                     // to log we want every time
-                    //error!("[{}] Error connecting to {remote_endpoint:?}, will retry {:?}", printer_log_id, e);
+                    error!("[{}] Error connecting to {remote_endpoint:?}, will retry ({:?})", printer_log_id, e);
                 }
                 socket_error_count += 1;
                 Timer::after(Duration::from_millis(2000)).await;

@@ -509,6 +509,7 @@ pub async fn spool_scale_task(
 
     let mut first_connect = true;
     let mut connect_error_counter = 0;
+    let mut conn_buf = alloc::vec![0_u8; 128*1024]; // large size for gcode_analysis
     'connect_loop: loop {
         Framework::wait_for_wifi(&framework).await;
         if first_connect {
@@ -516,8 +517,6 @@ pub async fn spool_scale_task(
         } else {
             Timer::after_secs(2).await;
         }
-        // let mut conn_buf = [0_u8; 1024];
-        let mut conn_buf = alloc::vec![0_u8; 128*1024]; // large size for gcode_analysis
         let mut conn: Connection<_> = Connection::new(&mut conn_buf, &tcp, SocketAddr::new(core::net::IpAddr::V4(spoolscale_ip), 81));
 
         let mut nonce = [0_u8; NONCE_LEN];
@@ -531,13 +530,13 @@ pub async fn spool_scale_task(
             .await
         {
             if connect_error_counter % 10 == 0 && connect_error_counter != 0 {
-                term_error!("SpoolScale: Error initiating web socket request {:?}", err);
+                term_error!("SpoolScale: Error connecting to Scale ({:?})", err);
             }
             connect_error_counter += 1;
             continue 'connect_loop;
         }
         if let Err(err) = conn.initiate_response().await {
-            term_error!("SpoolScale: Error initiating web socket response {:?}", err);
+            term_error!("SpoolScale: Error initiating web socket response ({:?})", err);
             continue 'connect_loop;
         }
 
