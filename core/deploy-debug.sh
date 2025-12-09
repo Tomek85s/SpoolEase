@@ -21,8 +21,7 @@ cargo xtask ota build --input "$proj_dir" --output "$base_target_dir${path_in_ba
 cargo xtask web-install build --input "$proj_dir" --output "$base_target_dir${path_in_base_target}/${product}/${rel_train}"
 popd
 
-replace=$(grep '^version' Cargo.toml | sed -E 's/version *= *"[^"]*-([^"]+)".*/\1/')
-
+replace=$(grep '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)".*/\1/')
 ${replace_dir} "$base_target_dir${path_in_base_target}/${page}" ${product} "$replace"
 
 # cd ../SpoolEase-Debug/improve-mqtt

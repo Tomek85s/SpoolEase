@@ -755,7 +755,16 @@ pub async fn spool_scale_task(
                             if matches!(console_to_scale, ConsoleToScale::RequestGcodeAnalysis { .. })
                                 || matches!(console_to_scale, ConsoleToScale::UpdateFirmware { .. })
                             {
-                                json = encrypt(&app_config.borrow().scale_encryption_key.borrow(), &json);
+                                let key = &app_config.borrow().scale_encryption_key.borrow();
+                                json = if key.is_empty() {
+                                    term_error!("Empty SpoolScale Security Key configured in Console , can't send message to scale");
+                                    if matches!(console_to_scale, ConsoleToScale::UpdateFirmware { .. }) {
+                                        spool_scale_rc.borrow().notify_ota_progress_update(&OtaProgressUpdate::Failed { text: "Scale Security Key not set in Console\nCan't Update Scale Firmware".to_string() });
+                                    }
+                                    continue;
+                                } else {
+                                    encrypt(key, &json)
+                                };
                             }
                             let send_to_scale_header = FrameHeader {
                                 frame_type: FrameType::Text(false),

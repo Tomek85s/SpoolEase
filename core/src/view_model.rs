@@ -24,7 +24,7 @@ use shared::gcode_analysis_task::{
     GcodeAnalysisRequestChannel, GcodeAnalyzerObserver,
 };
 use shared::settings::{
-    OTA_DOMAIN_DEBUG, OTA_DOMAIN_STABLE, OTA_TLS_CERTIFICATE, SCALE_DEBUG_OTA_PATH, SCALE_STABLE_OTA_PATH, SCALE_UNSTABLE_OTA_PATH,
+    OTA_DOMAIN_DEBUG, OTA_DOMAIN_STABLE, OTA_DOMAIN_UNSTABLE, OTA_TLS_CERTIFICATE, SCALE_DEBUG_OTA_PATH, SCALE_STABLE_OTA_PATH, SCALE_UNSTABLE_OTA_PATH
 };
 use shared::types::AppOtaTrain;
 use shared::utils::channel_send;
@@ -900,7 +900,7 @@ impl ViewModel {
 
                 let (ota_domain, ota_path) = match train {
                     AppOtaTrain::Stable => (OTA_DOMAIN_STABLE, SCALE_STABLE_OTA_PATH),
-                    AppOtaTrain::Unstable => (OTA_DOMAIN_STABLE, SCALE_UNSTABLE_OTA_PATH),
+                    AppOtaTrain::Unstable => (OTA_DOMAIN_UNSTABLE, SCALE_UNSTABLE_OTA_PATH),
                     AppOtaTrain::Debug => (OTA_DOMAIN_DEBUG, SCALE_DEBUG_OTA_PATH),
                 };
 

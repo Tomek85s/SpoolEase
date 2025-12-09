@@ -28,7 +28,7 @@ inblock {
     name=a[4]
     if (name==target) {
         copy=block
-        gsub("a1", repl, copy)
+        gsub("cargo_version", repl, copy)
         printf "%s", copy
     }
 }
