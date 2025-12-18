@@ -6,7 +6,6 @@ extern crate alloc;
 
 pub mod scale;
 
-pub mod ndef;
 pub mod nfc;
 pub mod pn532_ext;
 pub mod spool_tag;

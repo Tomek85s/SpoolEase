@@ -13,11 +13,11 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 
 use framework::prelude::*;
 use hashbrown::HashMap;
+use ndef_rs::{NdefMessage, NdefRecord, TNF, payload::UriPayload};
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 
 use crate::{
-    ndef,
     nfc::{self, get_nfc_tag_type, NfcTagType},
     pn532_ext,
 };
@@ -334,12 +334,23 @@ async fn nfc_task(
         if let Some(TagOperation::EmulateUrlTag(url_request)) = &curr_operation_with_tag {
             debug!("Emulating Tag");
 
-            let ndef_record = ndef::Record::new_url_record(&url_request.url);
+            let ndef_record = match NdefRecord::builder()
+                .tnf(TNF::WellKnown)
+                .payload(&UriPayload::from_string(&url_request.url))
+                .build() {
+                    Ok(v) => v,
+                    Err(err) => {
+                        panic!("Error generating NDEF record to emulate: {err:?}");
+                    }
+                };
+                
+            let message = NdefMessage::from(ndef_record);
+
             let mut uid = [0u8; 3];
             getrandom::getrandom(&mut uid).unwrap();
             let res = select(
                 tag_operation.wait(),
-                pn532_ext::emulate_tag(&mut pn532, ndef_record, Some(uid), Duration::from_secs(60)),
+                pn532_ext::emulate_tag(&mut pn532, message, Some(uid), Duration::from_secs(60)),
             )
             .await;
             match res {

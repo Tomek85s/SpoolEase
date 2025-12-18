@@ -13,15 +13,14 @@ dependencies = [
  "cfg-if",
  "critical-section",
  "ctr",
- "deku",
  "derivative",
  "display-interface",
  "display-interface-parallel-gpio",
- "edge-captive",
- "edge-dhcp",
- "edge-http",
- "edge-nal",
- "edge-nal-embassy",
+ "edge-captive 0.5.0 (git+https://github.com/yanshay/edge-net)",
+ "edge-dhcp 0.5.0 (git+https://github.com/yanshay/edge-net)",
+ "edge-http 0.5.1 (git+https://github.com/yanshay/edge-net)",
+ "edge-nal 0.5.0 (git+https://github.com/yanshay/edge-net)",
+ "edge-nal-embassy 0.5.0 (git+https://github.com/yanshay/edge-net)",
  "edge-ws",
  "embassy-embedded-hal",
  "embassy-executor",
@@ -581,17 +580,6 @@ name = "bitstream-io"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6099cdc01846bc367c4e7dd630dc5966dccf36b652fae7a74e17b640411a91b2"
-
-[[package]]
-name = "bitvec"
-version = "1.1.0"
-source = "git+https://github.com/arctic-alpaca/ferrilab#e13261ad836a5b4e0579d99b75d5603590093e7a"
-dependencies = [
- "funty",
- "radium",
- "tap",
- "wyz",
-]
 
 [[package]]
 name = "block-buffer"
@@ -1308,30 +1296,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c297a1c74b71ae29df00c3e22dd9534821d60eb9af5a0192823fa2acea70c2a"
 
 [[package]]
-name = "deku"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "709ade444d53896e60f6265660eb50480dd08b77bfc822e5dcc233b88b0b2fba"
-dependencies = [
- "bitvec",
- "deku_derive",
- "no_std_io",
- "rustversion",
-]
-
-[[package]]
-name = "deku_derive"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7534973f93f9de83203e41c8ddd32d230599fa73fa889f3deb1580ccd186913"
-dependencies = [
- "darling 0.20.11",
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "delegate"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1535,11 +1499,38 @@ dependencies = [
 [[package]]
 name = "edge-captive"
 version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ab9af1f77b827593933a8d31a8fbc0359a420bcf7c6bbf58272bb056afd8db2"
+dependencies = [
+ "domain",
+ "edge-nal 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log",
+]
+
+[[package]]
+name = "edge-captive"
+version = "0.5.0"
 source = "git+https://github.com/yanshay/edge-net#1ea2d4b0d4b5299c10fde81b9aec260e49865430"
 dependencies = [
  "domain",
- "edge-nal",
+ "edge-nal 0.5.0 (git+https://github.com/yanshay/edge-net)",
  "log",
+]
+
+[[package]]
+name = "edge-dhcp"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6c14e92b3e72e93428f87e64f14e2b868b8adcd2e38e0ebf72baa158fe0f930"
+dependencies = [
+ "edge-nal 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "edge-raw 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "embassy-futures",
+ "embassy-time",
+ "heapless 0.8.0",
+ "log",
+ "num_enum",
+ "rand_core",
 ]
 
 [[package]]
@@ -1547,8 +1538,8 @@ name = "edge-dhcp"
 version = "0.5.0"
 source = "git+https://github.com/yanshay/edge-net#1ea2d4b0d4b5299c10fde81b9aec260e49865430"
 dependencies = [
- "edge-nal",
- "edge-raw",
+ "edge-nal 0.5.0 (git+https://github.com/yanshay/edge-net)",
+ "edge-raw 0.5.0 (git+https://github.com/yanshay/edge-net)",
  "embassy-futures",
  "embassy-time",
  "heapless 0.8.0",
@@ -1560,10 +1551,28 @@ dependencies = [
 [[package]]
 name = "edge-http"
 version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bfda1b2c3d32409bb61b4cfab7ceaee9ff02a58388d7d2bf83b9f4a2cb8cb42"
+dependencies = [
+ "base64 0.13.1",
+ "edge-nal 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "embassy-futures",
+ "embassy-sync",
+ "embassy-time",
+ "embedded-io-async",
+ "heapless 0.8.0",
+ "httparse",
+ "log",
+ "sha1_smol",
+]
+
+[[package]]
+name = "edge-http"
+version = "0.5.1"
 source = "git+https://github.com/yanshay/edge-net#1ea2d4b0d4b5299c10fde81b9aec260e49865430"
 dependencies = [
  "base64 0.13.1",
- "edge-nal",
+ "edge-nal 0.5.0 (git+https://github.com/yanshay/edge-net)",
  "embassy-futures",
  "embassy-sync",
  "embassy-time",
@@ -1581,12 +1590,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9f618bf9df6b52043da1f8db87f527b6ee853fd6315ba29c016118d3f8d54c4"
 dependencies = [
  "domain",
- "edge-nal",
+ "edge-nal 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "embassy-futures",
  "embassy-sync",
  "embassy-time",
  "heapless 0.8.0",
  "log",
+]
+
+[[package]]
+name = "edge-nal"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac19c3edcdad839c71cb919cd09a632d9915d630760b37f0b74290188c08f248"
+dependencies = [
+ "embassy-time",
+ "embedded-io-async",
 ]
 
 [[package]]
@@ -1601,13 +1620,35 @@ dependencies = [
 [[package]]
 name = "edge-nal-embassy"
 version = "0.5.0"
-source = "git+https://github.com/yanshay/edge-net#1ea2d4b0d4b5299c10fde81b9aec260e49865430"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8aacee123b1a4df16dfba7b46ea0912e9d99bc099fe81bd2a564013510471e41"
 dependencies = [
- "edge-nal",
+ "edge-nal 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "embassy-futures",
  "embassy-net",
  "embedded-io-async",
  "heapless 0.8.0",
+]
+
+[[package]]
+name = "edge-nal-embassy"
+version = "0.5.0"
+source = "git+https://github.com/yanshay/edge-net#1ea2d4b0d4b5299c10fde81b9aec260e49865430"
+dependencies = [
+ "edge-nal 0.5.0 (git+https://github.com/yanshay/edge-net)",
+ "embassy-futures",
+ "embassy-net",
+ "embedded-io-async",
+ "heapless 0.8.0",
+]
+
+[[package]]
+name = "edge-raw"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d80a91a0c4abb68a9bc4c0df607135b5d9b6885b49acfe2d2c881e3f9623324"
+dependencies = [
+ "log",
 ]
 
 [[package]]
@@ -2139,7 +2180,7 @@ dependencies = [
 [[package]]
 name = "esp-hal-app-framework"
 version = "0.5.2"
-source = "git+https://github.com/yanshay/esp-hal-app/?tag=0.5.3#5e215f55fea0506c576178e074a9e8e2339bcb87"
+source = "git+https://github.com/yanshay/esp-hal-app/?tag=0.5.4#3e911da6c96b4cb76535df92a4c9a12d48763cb5"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -2149,15 +2190,14 @@ dependencies = [
  "chrono",
  "critical-section",
  "ctr",
- "deku",
  "display-interface",
  "display-interface-parallel-gpio",
- "edge-captive",
- "edge-dhcp",
- "edge-http",
+ "edge-captive 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "edge-dhcp 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "edge-http 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "edge-mdns",
- "edge-nal",
- "edge-nal-embassy",
+ "edge-nal 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "edge-nal-embassy 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
@@ -2215,7 +2255,7 @@ dependencies = [
 [[package]]
 name = "esp-hal-app-framework-macros"
 version = "0.1.0"
-source = "git+https://github.com/yanshay/esp-hal-app/?tag=0.5.3#5e215f55fea0506c576178e074a9e8e2339bcb87"
+source = "git+https://github.com/yanshay/esp-hal-app/?tag=0.5.4#3e911da6c96b4cb76535df92a4c9a12d48763cb5"
 dependencies = [
  "flate2",
  "proc-macro2",
@@ -2301,7 +2341,7 @@ dependencies = [
  "cfg-if",
  "critical-section",
  "crypto-bigint",
- "edge-nal",
+ "edge-nal 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "embedded-io",
  "embedded-io-async",
  "enumset",
@@ -2702,12 +2742,6 @@ checksum = "17186ad64927d5ac8f02c1e77ccefa08ccd9eaa314d5a4772278aa204a22f7e7"
 dependencies = [
  "gcd",
 ]
-
-[[package]]
-name = "funty"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
@@ -5242,11 +5276,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd7a31eed1591dcbc95d92ad7161908e72f4677f8fabf2a32ca49b4237cbf211"
 
 [[package]]
-name = "radium"
-version = "1.0.0"
-source = "git+https://github.com/arctic-alpaca/ferrilab#e13261ad836a5b4e0579d99b75d5603590093e7a"
-
-[[package]]
 name = "ral-registers"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5775,10 +5804,9 @@ name = "shared"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "deku",
- "edge-http",
- "edge-nal",
- "edge-nal-embassy",
+ "edge-http 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "edge-nal 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "edge-nal-embassy 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
@@ -6192,12 +6220,6 @@ dependencies = [
  "toml",
  "version-compare",
 ]
-
-[[package]]
-name = "tap"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "target-lexicon"
@@ -7213,15 +7235,6 @@ name = "writeable"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e9df38ee2d2c3c5948ea468a8406ff0db0b29ae1ffde1bcf20ef305bcc95c51"
-
-[[package]]
-name = "wyz"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
-dependencies = [
- "tap",
-]
 
 [[package]]
 name = "x11"

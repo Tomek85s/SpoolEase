@@ -2,11 +2,13 @@ use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
-use deku::DekuContainerWrite;
 use embassy_time::with_deadline;
 use embassy_time::Duration;
 use embassy_time::Instant;
 use embassy_time::Timer;
+use ndef_rs::tag::NFT2Tag;
+use ndef_rs::tag::TlvValue;
+use ndef_rs::NdefMessage;
 
 use core::cmp::min;
 use core::future::Future;
@@ -348,7 +350,7 @@ const NDEF_MAX_WRITE_LENGTH: usize = 256;
 
 pub async fn emulate_tag<I, T, const N: usize>(
     pn532: &mut pn532::Pn532<I, T, N>,
-    ndef_record: crate::ndef::Record,
+    message: NdefMessage,
     short_uid: Option<[u8; 3]>,
     timeout: Duration,
 ) -> Result<bool, String>
@@ -356,6 +358,21 @@ where
     I: pn532::Interface,
     T: pn532::CountDown<Time = embassy_time::Duration>,
 {
+    let tlv = TlvValue::ndef_message(&message)
+        .map_err(|err| format!("Emulate tag error - generating TLV {err:?}"))?;
+
+    let tag = NFT2Tag::builder().size_in_bytes(512).add_tlv(tlv).build();
+
+    let mut ndef_bytes = tag
+        .to_bytes()
+        .map_err(|err| format!("Emulate tag error - getting tag bytes {err:?}"))?;
+    if ndef_bytes.len() >= 5 {
+        ndef_bytes.drain(0..=3); // remove capability container
+    } else {
+        return Err("Emulating tag error - NDef Bytes less than 5".to_string());
+    }
+    ndef_bytes[0] = 0; // need null TLV at the beginning and not NDEF TLV for some reason
+
     // info!("---- Sending TG_INIT_AS_TARGET");
     match pn532
         .process(
@@ -374,13 +391,6 @@ where
             _ => return Err(format!("Error resopnse emulating tag: {err:?}")),
         },
     }
-
-    let ndef_structure = crate::ndef::NDEFStructureType4::new(ndef_record);
-
-    let ndef_bytes = match ndef_structure.to_bytes() {
-        Ok(v) => v,
-        Err(err) => return Err(format!("Failed to serialize NDEF record: {err:?}")),
-    };
 
     let mut current_file = TagFile::NONE;
     let mut send_buf = [0u8; NDEF_MAX_READ_LENGTH + 2];
@@ -585,7 +595,11 @@ where
 
             let read_data = pn532
                 .process(
-                    &pn532::Request::mifare_classic_authenticate_block(uid, block_number, pn532::requests::MifareAuthKey::A(key)),
+                    &pn532::Request::mifare_classic_authenticate_block(
+                        uid,
+                        block_number,
+                        pn532::requests::MifareAuthKey::A(key),
+                    ),
                     7,
                     end_time - Instant::now(),
                 )

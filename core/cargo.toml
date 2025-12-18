@@ -24,10 +24,6 @@ lto = false
 [profile.dev.package.esp-wifi]
 opt-level = 3
 
-[patch.crates-io]
-bitvec = { git = "https://github.com/arctic-alpaca/ferrilab" }
-radium = { git = "https://github.com/arctic-alpaca/ferrilab" }
-
 edge-nal-embassy = { git = "https://github.com/yanshay/edge-net" }
 edge-http = { git = "https://github.com/yanshay/edge-net" } 
 edge-dhcp = { git = "https://github.com/yanshay/edge-net" } 
@@ -41,8 +37,8 @@ walkdir = "2.5.0"
 
 [dependencies]
 #TODO: Important - lock to specific tag when released
-framework = { package = "esp-hal-app-framework", git = "https://github.com/yanshay/esp-hal-app/", tag = "0.5.3", features = ["esp32s3", "improv-jtag-serial", "wt32-sc01-plus"] }
-framework_macros = { package = "esp-hal-app-framework-macros", git = "https://github.com/yanshay/esp-hal-app/", tag = "0.5.3" }
+framework = { package = "esp-hal-app-framework", git = "https://github.com/yanshay/esp-hal-app/", tag = "0.5.4", features = ["esp32s3", "improv-jtag-serial", "wt32-sc01-plus"] }
+framework_macros = { package = "esp-hal-app-framework-macros", git = "https://github.com/yanshay/esp-hal-app/", tag = "0.5.4" }
 # framework = { package = "esp-hal-app-framework", path = "../../../esp-hal-app/esp-hal-app-framework/", features = ["esp32s3", "improv-jtag-serial", "wt32-sc01-plus"] }
 # framework_macros = { package = "esp-hal-app-framework-macros", path = "../../../esp-hal-app/esp-hal-app-framework-macros/" }
 esp32s3 = { version = "0.30.0" }
@@ -127,7 +123,6 @@ heapless = "0.8.0"
 critical-section = "1.2.0"
 static_cell = { version = "2.1", features = ["nightly"] }
 once_cell = { version = "1.20.2", default-features = false, features = ["alloc"] }
-deku = { version = "0.17.0", default-features = false, features = ["alloc"] }
 anyhow = { version = "1.0.91", default-features = false }
 snafu = { git = "https://github.com/shepmaster/snafu", rev = "aedc9db8c04a437b4c547efd4d73e9337fa43a4a", default-features = false, features = ["rust_1_81", "alloc"]} # , "backtraces-impl-backtrace-crate"]} 
 hashbrown = { version = "0.15.0", features = ["serde"] }
