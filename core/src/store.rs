@@ -181,10 +181,7 @@ impl Store {
                 Ok(acc)
             });
             // TODO: make it an error up as well, to handle in the caller
-            match results {
-                Ok(s) => Some(s),
-                Err(_) => None,
-            }
+            results.ok()
         } else {
             None
         }

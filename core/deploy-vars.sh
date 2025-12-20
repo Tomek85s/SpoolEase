@@ -17,8 +17,8 @@ fi
 path=$(pwd)
 base_target_dir=""
 while [ "$path" != "/" ]; do
-    if [ -d "$path/${base_target}" ]; then
-        base_target_dir="$path/${base_target}"
+    if [ -d "$path/hamster/${base_target}" ]; then
+        base_target_dir="$path/hamster/${base_target}"
         break
     fi
     path=$(dirname "$path")

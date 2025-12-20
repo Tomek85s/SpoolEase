@@ -36,7 +36,6 @@ export component SpoolStaging inherits Window {
 
                   // inventory-id
                   if AppState.spool-staging-info.spool-record.id != "": inventory-id := Text {
-                        padding: 0px;
                         horizontal-alignment: center;
                         font-size: 20px;
                         text: AppState.spool-staging-info.spool-record.id != "" ? "ID: \{AppState.spool-staging-info.spool-record.id}" : "";
@@ -44,7 +43,6 @@ export component SpoolStaging inherits Window {
                     }
 
                     material := Text {
-                        padding: 0px;
                         horizontal-alignment: center;
                         font-size: 20px;
                         text: AppState.spool-staging-info.spool-record.material-type;
@@ -52,7 +50,6 @@ export component SpoolStaging inherits Window {
                     }
 
                   if AppState.spool-staging-info.weight-left != "": Text {
-                        padding: 0px;
                         horizontal-alignment: center;
                         font-size: 20px;
                         text: AppState.spool-staging-info.weight-left;
@@ -61,7 +58,6 @@ export component SpoolStaging inherits Window {
 
                   // K Value (show only if no ID, otherwiser no room)
                   if AppState.spool-staging-info.weight-left == "" : k-value := Text {
-                        padding: 0px;
                         horizontal-alignment: center;
                         font-size: 20px;
                         text: "K: " + (AppState.spool-staging-info.spool-record.ext-has-k ? "✔" : "-");

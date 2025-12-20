@@ -4,7 +4,7 @@ use alloc::ffi::CString;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use embassy_net::{tcp::TcpSocket, IpAddress, IpEndpoint, Ipv4Address};
+use embassy_net::{IpAddress, IpEndpoint, Ipv4Address, tcp::TcpSocket};
 use esp_alloc::HeapStats;
 use esp_mbedtls::asynch::Session;
 use esp_mbedtls::{Certificates, Mode, TlsError, TlsReference, TlsVersion};
@@ -157,7 +157,7 @@ where
             _ => {
                 return Err(Error::Ftp {
                     response: user_response,
-                })
+                });
             }
         }
         // user ok, continue to password
@@ -368,10 +368,10 @@ where
                 })
             };
 
-            if let Ok(n) = res {
-                if self.left_to_retrieve.is_some() {
-                    self.left_to_retrieve = Some(left_to_retrieve.unwrap() - n);
-                }
+            if let Ok(n) = res
+                && self.left_to_retrieve.is_some()
+            {
+                self.left_to_retrieve = Some(left_to_retrieve.unwrap() - n);
             }
             res
         }

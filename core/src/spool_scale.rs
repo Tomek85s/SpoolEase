@@ -470,7 +470,9 @@ pub async fn spool_scale_task(
         spoolscale_name = configured_scale.name.clone();
     }
 
-    if configured_ip.is_none() {
+    if let Some(configured_ip) = configured_ip {
+        spoolscale_ip = configured_ip
+    } else {
         term_info!(
             "No SpoolScale IP configured, discovering {}",
             configured_name.as_ref().unwrap_or(&"".to_string())
@@ -498,13 +500,12 @@ pub async fn spool_scale_task(
                 }
             }
         }
-    } else {
-        spoolscale_ip = configured_ip.unwrap();
     }
+
     spool_scale_rc.borrow_mut().connected_scale = Some((spoolscale_name.clone(), spoolscale_ip));
 
     let tcp_buffers = Box::new(TcpBuffers::<1, 1024, 1024>::new());
-    let tcp = Tcp::new(stack, &tcp_buffers);
+    let tcp = Tcp::new(stack, &*tcp_buffers);
     let tcp = edge_nal::WithTimeout::new(15000, tcp);
 
     let mut first_connect = true;

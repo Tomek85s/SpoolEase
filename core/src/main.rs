@@ -3,7 +3,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(trait_alias)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(async_closure)]
 #![no_main]
 #![feature(associated_type_defaults)]
 #![recursion_limit = "256"] // due to picoserve complex types & embassy
@@ -36,7 +35,6 @@ use esp_backtrace as _;
 use esp_hal_ota::Ota;
 use esp_mbedtls::Tls;
 use esp_storage::FlashStorage;
-use esp_wifi::{init, EspWifiController};
 use framework_macros::include_bytes_gz;
 use slint::ComponentHandle;
 
@@ -44,7 +42,7 @@ extern crate alloc;
 
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_executor::Spawner;
-use embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4};
+use embassy_net::{Ipv4Cidr, StackResources, StaticConfigV4};
 use embassy_time::{Duration, Timer};
 
 use esp_backtrace as _;
@@ -52,12 +50,11 @@ use esp_hal::{
     clock::CpuClock,
     dma::DmaTxBuf,
     dma_buffers,
-    gpio::{Input, Level, Output, Pull},
-    psram,
+    gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
     rng::Rng,
     rtc_cntl::Rtc,
     spi::{self, master::Spi},
-    time::RateExtU32,
+    time::{Rate},
     timer::timg::TimerGroup,
 };
 
@@ -79,19 +76,7 @@ use web_app::{ConsoleAppState, NestedAppBuilder};
 const STA_STACK_RESOURCES: usize = WEB_SERVER_NUM_LISTENERS + 1 + MAX_NUM_PRINTERS + FRAMEWORK_STA_STACK_RESOURCES; // web-config listeners + USDP + mqtt*num-of-printers + from framework: potentially https captive +  ota + captive dns + ? initial firmware check if doen't complete
 const AP_STACK_RESOURCES: usize = WEB_SERVER_NUM_LISTENERS + FRAMEWORK_AP_STACK_RESOURCES;
 
-#[macro_export]
-macro_rules! heap_dram2_allocator {
-    ($size:expr) => {{
-        #[link_section = ".dram2_uninit"]
-        static mut HEAP2: core::mem::MaybeUninit<[u8; $size]> = core::mem::MaybeUninit::uninit();
-
-        unsafe {
-            #[allow(static_mut_refs)]
-            let region = HEAP2.as_mut_ptr() as *mut u8;
-            esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(region, $size, esp_alloc::MemoryCapability::Internal.into()));
-        }
-    }};
-}
+esp_bootloader_esp_idf::esp_app_desc!();
 
 fn init_psram_heap(start: *mut u8, size: usize) {
     unsafe {
@@ -99,7 +84,7 @@ fn init_psram_heap(start: *mut u8, size: usize) {
     }
 }
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(spawner: Spawner) {
     // ==================================================================================================================================================
     // == Mandatory Infrastructure ======================================================================================================================
@@ -108,15 +93,12 @@ async fn main(spawner: Spawner) {
     esp_println::logger::init_logger_from_env();
     info!("Application Start");
 
-    let mut peripherals = esp_hal::init(
-        esp_hal::Config::default()
-            .with_cpu_clock(CpuClock::max())
-            .with_psram(psram::PsramConfig::default()),
-    );
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals = esp_hal::init(config);
 
     #[allow(static_mut_refs)]
     unsafe {
-        RNG.set(Rng::new(&mut peripherals.RNG)).ok();
+        RNG.set(Rng::new()).ok();
     }
 
     let (start, size) = esp_hal::psram::psram_raw_parts(&peripherals.PSRAM);
@@ -125,11 +107,11 @@ async fn main(spawner: Spawner) {
 
     info!("Using PSRAM start: {start:x?} size: {size}");
 
-    // Second, reserve DRAM2 area (area used by bootloader during boot)
-    heap_dram2_allocator!(64 * 1024);
+    // Second, reserve from 'standard' area, if need additional memory for esp-wifi/esp-mbedtls, need to increase this
+    esp_alloc::heap_allocator!(size: 122 * 1024);
 
-    // Last, reserve from 'standard' area, if need additional memory for esp-wifi/esp-mbedtls, need to increase this
-    esp_alloc::heap_allocator!(154 * 1024);
+    // Last, reserve DRAM2 area (area used by bootloader during boot)
+    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64*1024); // 72kb in new memory.x ?
 
     spawner.spawn_heap(heap_stats_task()).ok();
 
@@ -145,7 +127,7 @@ async fn main(spawner: Spawner) {
 
     // == Initialize Embassy ==========================================================
 
-    esp_hal_embassy::init(timg0.timer1);
+    esp_rtos::start(timg0.timer1);
 
     // == Setup Flash Storage =========================================================
 
@@ -174,35 +156,46 @@ async fn main(spawner: Spawner) {
 
     debug!("Setting up Wifi Structs");
 
-    let init = &*mk_static!(
-        EspWifiController<'static>,
-        init(timg0.timer0, Rng::new(&mut peripherals.RNG), peripherals.RADIO_CLK,).unwrap()
-    );
-    let wifi = peripherals.WIFI;
+    let esp_radio_ctrl = &*mk_static!(esp_radio::Controller<'static> , esp_radio::init().unwrap());
 
-    let (wifi_ap_interface, wifi_sta_interface, controller) = esp_wifi::wifi::new_ap_sta(init, wifi).unwrap();
+    let (controller, interfaces) =
+        esp_radio::wifi::new(esp_radio_ctrl, peripherals.WIFI, Default::default()).unwrap();
 
-    let sta_config = Config::dhcpv4(Default::default());
+    let wifi_ap_device = interfaces.ap;
+    let wifi_sta_device = interfaces.sta;
 
-    let mut seed_bytes = [0u8; 8];
-    getrandom::getrandom(&mut seed_bytes).unwrap();
-    let seed = u64::from_le_bytes(seed_bytes);
+    let sta_config = embassy_net::Config::dhcpv4(Default::default());
+
+    let rng = Rng::new();
+    let seed = (rng.random() as u64) << 32 | rng.random() as u64;
+
+    // Init network stacks
 
     let (sta_stack, sta_runner) = embassy_net::new(
-        wifi_sta_interface,
+        wifi_sta_device,
         sta_config,
-        mk_static!(StackResources<STA_STACK_RESOURCES>, StackResources::<STA_STACK_RESOURCES>::new()),
+        mk_static!(
+            StackResources<STA_STACK_RESOURCES>,
+            StackResources::<STA_STACK_RESOURCES>::new()
+        ),
         seed,
     );
+
     let ap_config = embassy_net::Config::ipv4_static(StaticConfigV4 {
-        address: Ipv4Cidr::new(Ipv4Addr::new(AP_ADDR.0, AP_ADDR.1, AP_ADDR.2, AP_ADDR.3), 24),
+        address: Ipv4Cidr::new(
+            Ipv4Addr::new(AP_ADDR.0, AP_ADDR.1, AP_ADDR.2, AP_ADDR.3),
+            24,
+        ),
         gateway: Some(Ipv4Addr::new(AP_ADDR.0, AP_ADDR.1, AP_ADDR.2, AP_ADDR.3)),
         dns_servers: Default::default(),
     });
     let (ap_stack, ap_runner) = embassy_net::new(
-        wifi_ap_interface,
+        wifi_ap_device,
         ap_config,
-        mk_static!(StackResources<AP_STACK_RESOURCES>, StackResources::<AP_STACK_RESOURCES>::new()),
+        mk_static!(
+            StackResources<AP_STACK_RESOURCES>,
+            StackResources::<AP_STACK_RESOURCES>::new()
+        ),
         seed,
     );
 
@@ -365,17 +358,17 @@ async fn main(spawner: Spawner) {
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(64);
     let spi_dma_rx_buf = esp_hal::dma::DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     let spi_dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
-    let pn532_irq = Input::new(peripherals.GPIO14, Pull::None);
+    let pn532_irq = Input::new(peripherals.GPIO14, InputConfig::default().with_pull(Pull::None));
 
     let sck = peripherals.GPIO13;
-    let mosi = Output::new(peripherals.GPIO11, Level::High);
+    let mosi = Output::new(peripherals.GPIO11, Level::High, OutputConfig::default());
     let miso = peripherals.GPIO12;
-    let cs = Output::new(peripherals.GPIO10, Level::High);
+    let cs = Output::new(peripherals.GPIO10, Level::High, OutputConfig::default());
 
     let spi = Spi::new(
         peripherals.SPI2,
         esp_hal::spi::master::Config::default()
-            .with_frequency(2000.kHz())
+            .with_frequency(Rate::from_khz(2000))
             .with_mode(spi::Mode::_0)
             .with_read_bit_order(spi::BitOrder::LsbFirst)
             .with_write_bit_order(spi::BitOrder::LsbFirst),
@@ -494,7 +487,7 @@ async fn web_server_task(runner: &'static framework::web_server::WebAppRunner<Co
 }
 
 #[embassy_executor::task]
-pub async fn display_runner(mut runner: WT32SC01PlusRunner<esp_hal::dma::DmaChannel0, esp_hal::peripherals::I2C0>) {
+pub async fn display_runner(mut runner: WT32SC01PlusRunner<esp_hal::peripherals::DMA_CH0<'static>, esp_hal::peripherals::I2C0<'static>>) {
     runner.run().await;
 }
 

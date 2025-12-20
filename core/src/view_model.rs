@@ -223,6 +223,10 @@ impl ViewModel {
         let mut printer_index = 0; // starts from zero and incremented only on successful init and adding to array
         let mut available_printers: Vec<SharedString> = Vec::new();
         for printer_config in &self.app_config.borrow().configured_printers.printers {
+            if printer_number > 5 {
+                term_info!("Printers limit reached - max five printers supported");
+                break;
+            }
             match bambu::init(
                 self.framework.clone(),
                 printer_number,
@@ -1354,8 +1358,8 @@ impl ViewModel {
     }
 
     fn try_dispatch_next_gcode_job(&mut self) {
-        let console_tls_slots_capacity = 3 - self.bambu_printer_model.printers.len(); // per memory available
-        let scale_tls_slots_capacity: usize = if self.app_config.borrow().is_scale_available() { 4 } else { 0 };
+        let console_tls_slots_capacity = 100;// with new esp-mbedtls seems no limit, // 3 - self.bambu_printer_model.printers.len(); // per memory available
+        let scale_tls_slots_capacity: usize = 100; // if self.app_config.borrow().is_scale_available() { 4 } else { 0 };
         let console_tls_slots_used: usize = self
             .gcode_jobs
             .iter()

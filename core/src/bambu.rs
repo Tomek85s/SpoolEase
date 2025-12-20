@@ -1059,10 +1059,10 @@ impl BambuPrinter {
                                 // TODO: can take if work properly
                             }
                         }
-                        return Some(new_tray);
+                        Some(new_tray)
                     } else {
                         // Empty tray data means tray empty in case of external
-                        return Some(Tray::unknown());
+                        Some(Tray::unknown())
                     }
                 } else {
                     // Error in tray information, don't change anything
@@ -2842,7 +2842,7 @@ pub async fn incoming_messages_task(read_packets: Rc<ReadPacketsPubSub>, bambu_p
                         }
                         mqttrust::Packet::Suback(mqttrust::encoding::v4::Suback { pid: _, return_codes: _ }) => {
                             // Subscribed, now time to request for update
-                            let spawner = embassy_executor::Spawner::for_current_executor().await;
+                            let spawner = unsafe {embassy_executor::Spawner::for_current_executor().await};
                             spawner.spawn(fetch_initial_info(bambu_printer.clone())).ok();
                         }
                         _ => {

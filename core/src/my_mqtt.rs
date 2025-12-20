@@ -118,7 +118,7 @@ where
 
         Ok(())
     }
-    pub async fn subscribe<'b: 'a>(&mut self, _pid: Option<Pid>, topics: &[SubscribeTopic<'_>]) -> Result<Option<Packet>, MyMqttError> {
+    pub async fn subscribe<'b: 'a>(&mut self, _pid: Option<Pid>, topics: &[SubscribeTopic<'_>]) -> Result<Option<Packet<'_>>, MyMqttError> {
         let subscribe = Subscribe::new(topics);
         let packet = Packet::Subscribe(subscribe);
 
@@ -163,7 +163,7 @@ where
         self.write(packet).await
     }
 
-    pub async fn read(&mut self) -> Result<Option<Packet>, MyMqttError> {
+    pub async fn read(&mut self) -> Result<Option<Packet<'_>>, MyMqttError> {
         self.buf.copy_within(self.message_bytes_in_buf.., 0);
         self.data_bytes_in_buf -= self.message_bytes_in_buf;
         self.message_bytes_in_buf = 0;

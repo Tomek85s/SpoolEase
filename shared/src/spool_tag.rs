@@ -5,9 +5,9 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use embassy_executor::Spawner;
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 
@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 
 use crate::{
-    nfc::{self, get_nfc_tag_type, NfcTagType},
+    nfc::{self, NfcTagType, get_nfc_tag_type},
     pn532_ext,
 };
 
@@ -94,8 +94,7 @@ impl SpoolTag {
         // can check with only one observer so checking first
         if let Some(weak_observer) = self.observers.first() {
             let observer = weak_observer.upgrade().unwrap();
-            let res = observer.borrow_mut().is_tag_in_store(tag_uid);
-            res
+            observer.borrow_mut().is_tag_in_store(tag_uid)
         } else {
             false
         }
@@ -337,13 +336,14 @@ async fn nfc_task(
             let ndef_record = match NdefRecord::builder()
                 .tnf(TNF::WellKnown)
                 .payload(&UriPayload::from_string(&url_request.url))
-                .build() {
-                    Ok(v) => v,
-                    Err(err) => {
-                        panic!("Error generating NDEF record to emulate: {err:?}");
-                    }
-                };
-                
+                .build()
+            {
+                Ok(v) => v,
+                Err(err) => {
+                    panic!("Error generating NDEF record to emulate: {err:?}");
+                }
+            };
+
             let message = NdefMessage::from(ndef_record);
 
             let mut uid = [0u8; 3];
@@ -492,15 +492,15 @@ async fn nfc_task(
                                 .borrow()
                                 .notify_tag_status(Status::FoundTagNowWriting);
                             let found_uid = last_seen_tag.as_ref().unwrap().uid();
-                            if let Some(check_uid) = &write_tag_reuest.check_uid {
-                                if check_uid.as_slice() != found_uid {
-                                    spool_tag_rc.borrow().notify_tag_status(Status::Failure(
-                                        Failure::TagWriteFailure(
-                                            "Tag Not Linked to Spool\nUse Correct Tag".to_string(),
-                                        ),
-                                    ));
-                                    continue;
-                                }
+                            if let Some(check_uid) = &write_tag_reuest.check_uid
+                                && check_uid.as_slice() != found_uid
+                            {
+                                spool_tag_rc.borrow().notify_tag_status(Status::Failure(
+                                    Failure::TagWriteFailure(
+                                        "Tag Not Linked to Spool\nUse Correct Tag".to_string(),
+                                    ),
+                                ));
+                                continue;
                             }
                             let tag_uid =
                                 URL_SAFE_NO_PAD.encode(last_seen_tag.as_ref().unwrap().uid());
@@ -640,7 +640,9 @@ async fn nfc_task(
                                     message: None,
                                 })
                             } else {
-                                error!("Unknown tag type scanned with tag_res: {tag_res:x?}, not supported, please report on GitHub/Discord");
+                                error!(
+                                    "Unknown tag type scanned with tag_res: {tag_res:x?}, not supported, please report on GitHub/Discord"
+                                );
                             };
 
                             if let Some(final_read_result) = final_read_result {
@@ -664,15 +666,15 @@ async fn nfc_task(
                                 .borrow()
                                 .notify_tag_status(Status::FoundTagNowErasing);
                             let found_uid = last_seen_tag.as_ref().unwrap().uid();
-                            if let Some(check_uid) = check_uid {
-                                if check_uid.as_slice() != found_uid {
-                                    spool_tag_rc.borrow().notify_tag_status(Status::Failure(
-                                        Failure::TagWriteFailure(
-                                            "Not the Tag to Erase\nUse Correct Tag".to_string(),
-                                        ),
-                                    ));
-                                    continue;
-                                }
+                            if let Some(check_uid) = check_uid
+                                && check_uid.as_slice() != found_uid
+                            {
+                                spool_tag_rc.borrow().notify_tag_status(Status::Failure(
+                                    Failure::TagWriteFailure(
+                                        "Not the Tag to Erase\nUse Correct Tag".to_string(),
+                                    ),
+                                ));
+                                continue;
                             }
                             match nfc::erase_ndef_tag(&mut pn532, Duration::from_secs(2)).await {
                                 Ok(()) => {
@@ -744,7 +746,9 @@ async fn nfc_task(
                                     ));
                                 }
                                 Some(TagOperation::EmulateUrlTag(_)) => {
-                                    panic!("Arrived to EmulateUrlTag while scanning - Software Bug (2)!!!");
+                                    panic!(
+                                        "Arrived to EmulateUrlTag while scanning - Software Bug (2)!!!"
+                                    );
                                 }
                                 None => {}
                             }

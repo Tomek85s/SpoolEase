@@ -76,6 +76,8 @@ where
     I: pn532::Interface,
 {
     Timer::after_millis(10).await; // wait for stable RF field
+
+    #[allow(clippy::manual_div_ceil)]
     let num_pages = (buf.len() + 3) / 4; // complement to include partial data on last page
 
     let end_time = Instant::now() + timeout;
@@ -128,6 +130,7 @@ where
 {
     assert!(len >= buf.len());
     // read is in 16 bytes chunks
+    #[allow(clippy::manual_div_ceil)]
     let num_chunks = u8::try_from((len + 15) / 16).unwrap();
 
     let end_time = Instant::now() + timeout;

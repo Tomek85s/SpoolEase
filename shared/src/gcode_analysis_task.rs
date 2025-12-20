@@ -10,7 +10,7 @@ use alloc::{
 };
 use edge_http::io::client::Connection;
 use edge_nal_embassy::{Tcp, TcpBuffers};
-use embassy_net::{tcp::TcpSocket, IpAddress, Ipv4Address};
+use embassy_net::{IpAddress, Ipv4Address, tcp::TcpSocket};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel, pubsub::PubSubChannel};
 use embassy_time::{Duration, Instant};
 use embedded_io_async::Read;
@@ -80,18 +80,17 @@ impl FilamentUsage {
             let mut split = line.split(',');
             if let (Some(layer), Some(gcode_filament_id), Some(weight_g)) =
                 (split.next(), split.next(), split.next())
-            {
-                if let (Ok(layer), Ok(gcode_filament_id), Ok(weight_g)) = (
+                && let (Ok(layer), Ok(gcode_filament_id), Ok(weight_g)) = (
                     layer.parse::<i32>(),
                     gcode_filament_id.parse::<i32>(),
                     weight_g.parse::<f32>(),
-                ) {
-                    self.data.push(FilamentUsageEntry {
-                        layer,
-                        gcode_filament_id,
-                        weight_g,
-                    })
-                }
+                )
+            {
+                self.data.push(FilamentUsageEntry {
+                    layer,
+                    gcode_filament_id,
+                    weight_g,
+                })
             }
         }
     }
@@ -215,7 +214,9 @@ pub async fn fetch_gcode_analysis_task(
             }
             _ => {
                 if gcode_analysis_request.fetch_3mf == Fetch3mf::CloudHttp {
-                    info!("[{printer_log_id}] Configuration is to fetch 3mf file over HTTP, but file is from sdcard, so using to ftp");
+                    info!(
+                        "[{printer_log_id}] Configuration is to fetch 3mf file over HTTP, but file is from sdcard, so using to ftp"
+                    );
                 }
                 // ftp
                 fetch_gcode_analysis_task_printer_ftp(
@@ -341,10 +342,9 @@ async fn fetch_gcode_analysis_task_printer_ftp(
     if let Some(GcodeAnalysisNotification::Cancel {
         job_number: canceled_job_number,
     }) = notifications.try_next_message_pure()
+        && canceled_job_number == job_number
     {
-        if canceled_job_number == job_number {
-            return FetchSubtaskResult::Canceled;
-        }
+        return FetchSubtaskResult::Canceled;
     }
 
     let username = if !VSFTPD { "bblp" } else { "ftpuser" };
@@ -371,19 +371,17 @@ async fn fetch_gcode_analysis_task_printer_ftp(
     if let Some(GcodeAnalysisNotification::Cancel {
         job_number: canceled_job_number,
     }) = notifications.try_next_message_pure()
+        && canceled_job_number == job_number
     {
-        if canceled_job_number == job_number {
-            return FetchSubtaskResult::Canceled;
-        }
+        return FetchSubtaskResult::Canceled;
     }
 
     // it looks like in the gcode file name (not in the bbl file name) bambu uses for gcode filename the text until "." in case there is such
 
-
-    let threemf_filenames =if let Some(filename) = threemf_url.strip_prefix("file:///sdcard") {
+    let threemf_filenames = if let Some(filename) = threemf_url.strip_prefix("file:///sdcard") {
         // seen on X1C
         // file:///sdcard/Skadis_Storage_Box_Scale_Small_Plate 1.gcode.3mf
-        // file is in the ftp root 
+        // file is in the ftp root
         alloc::vec![filename.to_string()]
     } else if let Some(filename) = threemf_url.strip_prefix("file:///mnt/sdcard") {
         // seen on X1C when printing from console
@@ -403,17 +401,19 @@ async fn fetch_gcode_analysis_task_printer_ftp(
         // seen on H2D when doing a reprint
         // file:///media/usb0/Cube.gcode.3mf
         alloc::vec![format!("{filename}")]
-    }
-    else {
+    } else {
         // this is the case where we use the subtask_name field from the mqtt
         // after some chars were fixed (in view_model) based on the printer type
         // not nice to do it there, but didn't want to propgate printer type here now.
 
-        // one example for such case is when file is sent over http but setting is to retrieve using ftp 
+        // one example for such case is when file is sent over http but setting is to retrieve using ftp
         alloc::vec![
             format!("/{}.gcode.3mf", gcode_analysis_request.threemf_ftp_filename),
             format!("/{}.3mf", gcode_analysis_request.threemf_ftp_filename),
-            format!("/cache/{}.gcode.3mf", gcode_analysis_request.threemf_ftp_filename),
+            format!(
+                "/cache/{}.gcode.3mf",
+                gcode_analysis_request.threemf_ftp_filename
+            ),
             format!("/cache/{}.3mf", gcode_analysis_request.threemf_ftp_filename),
         ]
     };
@@ -445,10 +445,9 @@ async fn fetch_gcode_analysis_task_printer_ftp(
                 if let Some(GcodeAnalysisNotification::Cancel {
                     job_number: canceled_job_number,
                 }) = notifications.try_next_message_pure()
+                    && canceled_job_number == job_number
                 {
-                    if canceled_job_number == job_number {
-                        return FetchSubtaskResult::Canceled;
-                    }
+                    return FetchSubtaskResult::Canceled;
                 }
                 match ftps.retrieve(&mut buf).await {
                     Ok(n) => {
@@ -491,14 +490,18 @@ async fn fetch_gcode_analysis_task_printer_ftp(
                         }
                     }
                     Err(err) => {
-                        error!("[{printer_log_id}] Error while reading gcode file {gcode_filename_in_3mf} {err:?}");
+                        error!(
+                            "[{printer_log_id}] Error while reading gcode file {gcode_filename_in_3mf} {err:?}"
+                        );
                         return FetchSubtaskResult::Failed;
                     }
                 };
             };
             // first thing, let's send final data available (ftp could still fail, and even partial data is better than nothing)
             gcode_calc.done();
-            info!("[{printer_log_id}] Completed reading and processing gcode file '{gcode_filename_in_3mf}' in one of '{threemf_filenames:?}'");
+            info!(
+                "[{printer_log_id}] Completed reading and processing gcode file '{gcode_filename_in_3mf}' in one of '{threemf_filenames:?}'"
+            );
             observer.upgrade().unwrap().borrow_mut().on_gcode_analysis(
                 job_number,
                 printer_index,
@@ -506,7 +509,9 @@ async fn fetch_gcode_analysis_task_printer_ftp(
             );
 
             if !success {
-                debugex!("[{printer_log_id}] Inflate did not recognize end of file data stream, it's probably totally fine, but logged");
+                debugex!(
+                    "[{printer_log_id}] Inflate did not recognize end of file data stream, it's probably totally fine, but logged"
+                );
             }
 
             // Close ftp session - can fail
@@ -514,18 +519,24 @@ async fn fetch_gcode_analysis_task_printer_ftp(
             // needs to take place after all types of retrieve end, whether stream ends or interesting data ends
             debugex!(">>>> Calling end_retrieve from the client");
             if let Err(err) = ftps.end_retrieve().await {
-                debugex!("[{printer_log_id}] Ftp reported error on end_retrieve, code -1 or 426 are by design : {err:?} ", );
+                debugex!(
+                    "[{printer_log_id}] Ftp reported error on end_retrieve, code -1 or 426 are by design : {err:?} ",
+                );
             }
         }
         Err(err) => {
-            error!("[{printer_log_id}] Error initiating retrieve of 3mf file one of {threemf_filenames:?} {err:?}");
+            error!(
+                "[{printer_log_id}] Error initiating retrieve of 3mf file one of {threemf_filenames:?} {err:?}"
+            );
             return FetchSubtaskResult::Failed;
         }
     };
 
     match ftps.quit().await {
         Ok(success) => {
-            debugex!("[{printer_log_id}] Ftp Quit status {success} (true - quit took place, false - control channel closed earlier)");
+            debugex!(
+                "[{printer_log_id}] Ftp Quit status {success} (true - quit took place, false - control channel closed earlier)"
+            );
         }
         Err(err) => {
             debugex!("[{printer_log_id}] Error in Ftp Quit: {:?}", err);
@@ -596,10 +607,9 @@ async fn fetch_gcode_analysis_task_cloud_http(
     if let Some(GcodeAnalysisNotification::Cancel {
         job_number: canceled_job_number,
     }) = notifications.try_next_message_pure()
+        && canceled_job_number == job_number
     {
-        if canceled_job_number == job_number {
-            return FetchSubtaskResult::Canceled;
-        }
+        return FetchSubtaskResult::Canceled;
     }
 
     if ips.is_empty() {
@@ -665,10 +675,9 @@ async fn fetch_gcode_analysis_task_cloud_http(
     if let Some(GcodeAnalysisNotification::Cancel {
         job_number: canceled_job_number,
     }) = notifications.try_next_message_pure()
+        && canceled_job_number == job_number
     {
-        if canceled_job_number == job_number {
-            return FetchSubtaskResult::Canceled;
-        }
+        return FetchSubtaskResult::Canceled;
     }
 
     if let Err(err) = conn.initiate_response().await {
@@ -679,10 +688,9 @@ async fn fetch_gcode_analysis_task_cloud_http(
     if let Some(GcodeAnalysisNotification::Cancel {
         job_number: canceled_job_number,
     }) = notifications.try_next_message_pure()
+        && canceled_job_number == job_number
     {
-        if canceled_job_number == job_number {
-            return FetchSubtaskResult::Canceled;
-        }
+        return FetchSubtaskResult::Canceled;
     }
 
     let headers = match conn.headers() {
@@ -717,10 +725,9 @@ async fn fetch_gcode_analysis_task_cloud_http(
         if let Some(GcodeAnalysisNotification::Cancel {
             job_number: canceled_job_number,
         }) = notifications.try_next_message_pure()
+            && canceled_job_number == job_number
         {
-            if canceled_job_number == job_number {
-                return FetchSubtaskResult::Canceled;
-            }
+            return FetchSubtaskResult::Canceled;
         }
         match conn.read(&mut buf).await {
             Ok(n) => {
@@ -751,14 +758,18 @@ async fn fetch_gcode_analysis_task_cloud_http(
                 }
             }
             Err(err) => {
-                error!("[{printer_log_id}] Error while reading gcode file {gcode_filename_in_3mf} {err:?}");
+                error!(
+                    "[{printer_log_id}] Error while reading gcode file {gcode_filename_in_3mf} {err:?}"
+                );
                 return FetchSubtaskResult::Failed;
             }
         };
     }
     gcode_calc.done();
 
-    info!("[{printer_log_id}] Completed reading and processing gcode file {gcode_filename_in_3mf} in {threemf_filename}");
+    info!(
+        "[{printer_log_id}] Completed reading and processing gcode file {gcode_filename_in_3mf} in {threemf_filename}"
+    );
 
     observer.upgrade().unwrap().borrow_mut().on_gcode_analysis(
         job_number,
@@ -805,18 +816,25 @@ fn process_incoming_data(
             FeedStatus::OutputProcessorEnded => return ProcessResponse::Break,
         },
         Err(err) => {
-            error!("[{printer_log_id}] Error while processing gcode data in file {gcode_file_name_in_3mf} {err:?}");
+            error!(
+                "[{printer_log_id}] Error while processing gcode data in file {gcode_file_name_in_3mf} {err:?}"
+            );
             return ProcessResponse::Return;
         }
     }
     if last_report.elapsed() > *report_intervals {
-        info!("[{printer_log_id}] 3MF Download ({fetch_3mf_str}): {total_read} bytes processed, {} consumtion entries generted", gcode_calc.layers_extruded.len());
+        info!(
+            "[{printer_log_id}] 3MF Download ({fetch_3mf_str}): {total_read} bytes processed, {} consumtion entries generted",
+            gcode_calc.layers_extruded.len()
+        );
         *last_report = Instant::now();
     }
     if *total_on_last_send < 1024 * 1024 && time_on_last_send.elapsed() > Duration::from_secs(60) {
         *time_on_last_send = Instant::now();
         *total_on_last_send = *total_read;
-        info!("[{printer_log_id}] Sending partial consumption information after {total_read} bytes downloaded");
+        info!(
+            "[{printer_log_id}] Sending partial consumption information after {total_read} bytes downloaded"
+        );
         return ProcessResponse::SendAndContinue;
     }
     ProcessResponse::Continue
