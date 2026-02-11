@@ -27,6 +27,7 @@ And most importantly, even though it’s an open-source project, it’s fun and 
 
 - [Documentation](https://docs.spoolease.io/docs/welcome)
 - [Flashing Web Site](https://www.spoolease.io)
+- [Reddit](https://www.reddit.com/r/SpoolEase/)
 - [Discord Server](https://discord.gg/6brKUCERcQ)
 
 ## Show Your Appreciation  
