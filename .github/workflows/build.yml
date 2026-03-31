@@ -10,7 +10,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          # Instalujemy niezbędne biblioteki systemowe, w tym libudev-dev
+          # Instalacja niezbędnych bibliotek, w tym libudev-dev dla espflash
           sudo apt-get install -y libclang-dev cmake gcc-riscv64-unknown-elf libssl-dev pkg-config libuv1-dev libudev-dev
 
       - name: Setup ESP Rust
@@ -23,17 +23,17 @@ jobs:
       - name: Build and Merge Binary
         working-directory: ./core
         run: |
-          # Naprawiamy wielkość liter w nazwie pliku
+          # Rozwiązanie problemu wielkości liter w nazwie pliku
           if [ -f "cargo.toml" ]; then mv cargo.toml Cargo.toml; fi
           
-          # Usuwamy kłopotliwy plik toolchaina autora
+          # Usunięcie blokady toolchaina 'esp'
           rm -f rust-toolchain.toml
           
-          # Instalujemy narzędzie do tworzenia gotowych obrazów .bin
+          # Instalacja narzędzia do generowania obrazu binarnego
           cargo install espflash --no-default-features --features cli --version 2.1.0
           
-          # Generujemy scalony plik merged.bin (zawiera bootloader i kod)
-          cargo espflash save-image --release --target xtensa-esp32s3-none-elf ../merged.bin
+          # Użycie pełnej ścieżki do espflash, aby uniknąć błędów sesji
+          /home/runner/.cargo/bin/espflash save-image --release --target xtensa-esp32s3-none-elf ../merged.bin
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
