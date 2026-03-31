@@ -19,20 +19,18 @@ jobs:
           buildtargets: esp32s3
           ldproxy: true
 
-      - name: Build Firmware
+      - name: Build and Merge Binary
         working-directory: ./core
         run: |
-          # Rozwiązujemy problem wielkości liter w nazwie pliku cargo.toml
           if [ -f "cargo.toml" ]; then mv cargo.toml Cargo.toml; fi
-          
-          # Usuwamy plik konfiguracyjny autora, który blokuje serwer
           rm -f rust-toolchain.toml
-          
-          # Budujemy firmware dla ESP32-S3
-          cargo build --release --target xtensa-esp32s3-none-elf
+          # Instalujemy narzędzie espflash, które zrobi "czystą" binarkę
+          cargo install espflash --no-default-features --features cli --version 2.1.0
+          # Ta komenda tworzy plik merged.bin, który ma w sobie wszystko (0x0)
+          cargo espflash save-image --release --target xtensa-esp32s3-none-elf ../merged.bin
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: spool-ease-bin
-          path: core/target/xtensa-esp32s3-none-elf/release/
+          name: SpoolEase-Final-PL
+          path: merged.bin
