@@ -6,12 +6,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev cmake gcc-riscv64-unknown-elf libssl-dev pkg-config libuv1-dev
+
+      - name: Setup ESP Rust
+        uses: esp-rs/xtensa-toolchain@v1.5
         with:
-          targets: riscv32imc-unknown-none-elf, xtensa-esp32s3-none-elf
-          
+          default: true
+          buildtargets: esp32s3
+          ldproxy: true
+
       - name: Install espflash
         run: cargo install espflash --no-default-features --features cli
 
@@ -22,4 +29,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: spool-ease-bin
-          path: target/xtensa-esp32s3-none-elf/release/spool-ease
+          path: target/xtensa-esp32s3-none-elf/release/
