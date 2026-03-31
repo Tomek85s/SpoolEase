@@ -22,8 +22,13 @@ jobs:
       - name: Build Firmware
         working-directory: ./core
         run: |
-          # Usuwamy plik konfiguracyjny autora, który wymusza błędną nazwę toolchaina
+          # Rozwiązujemy problem wielkości liter w nazwie pliku cargo.toml
+          if [ -f "cargo.toml" ]; then mv cargo.toml Cargo.toml; fi
+          
+          # Usuwamy plik konfiguracyjny autora, który blokuje serwer
           rm -f rust-toolchain.toml
+          
+          # Budujemy firmware dla ESP32-S3
           cargo build --release --target xtensa-esp32s3-none-elf
 
       - name: Upload Artifact
