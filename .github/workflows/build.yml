@@ -20,13 +20,14 @@ jobs:
           ldproxy: true
 
       - name: Build Firmware
-        # Wchodzimy do folderu core i tam budujemy
         working-directory: ./core
-        run: cargo build --release --target xtensa-esp32s3-none-elf
+        run: |
+          # Usuwamy plik konfiguracyjny autora, który wymusza błędną nazwę toolchaina
+          rm -f rust-toolchain.toml
+          cargo build --release --target xtensa-esp32s3-none-elf
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: spool-ease-bin
-          # Ścieżka relatywna do głównego folderu
           path: core/target/xtensa-esp32s3-none-elf/release/
