@@ -22,11 +22,19 @@ jobs:
       - name: Build and Merge Binary
         working-directory: ./core
         run: |
+          # Poprawka wielkości liter w nazwie pliku konfiguracyjnego
           if [ -f "cargo.toml" ]; then mv cargo.toml Cargo.toml; fi
           rm -f rust-toolchain.toml
+          
+          # Instalacja narzędzia do tworzenia obrazów binarnych
           cargo install espflash --no-default-features --features cli --version 2.1.0
+          
+          # 1. Właściwa kompilacja Twojego spolszczonego kodu
           cargo build --release --target xtensa-esp32s3-none-elf
-          /home/runner/.cargo/bin/espflash save-image --chip esp32s3 target/xtensa-esp32s3-none-elf/release/spool-ease ../merged.bin
+          
+          # 2. Pakowanie skompilowanego pliku do formatu zrozumiałego dla ESP32-S3
+          # Zmieniona ścieżka na ./target/... (relatywna do folderu core)
+          /home/runner/.cargo/bin/espflash save-image --chip esp32s3 ./target/xtensa-esp32s3-none-elf/release/spool-ease ../merged.bin
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
