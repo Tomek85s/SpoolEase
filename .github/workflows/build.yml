@@ -10,7 +10,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          # Instalacja bibliotek systemowych potrzebnych do kompilacji i obsługi obrazów ESP
           sudo apt-get install -y libclang-dev cmake gcc-riscv64-unknown-elf libssl-dev pkg-config libuv1-dev libudev-dev
 
       - name: Setup ESP Rust
@@ -23,22 +22,14 @@ jobs:
       - name: Build and Merge Binary
         working-directory: ./core
         run: |
-          # Poprawka nazw plików (wymagane przez Rust/Cargo)
           if [ -f "cargo.toml" ]; then mv cargo.toml Cargo.toml; fi
           rm -f rust-toolchain.toml
-          
-          # Instalacja narzędzia espflash do generowania obrazów binarnych
           cargo install espflash --no-default-features --features cli --version 2.1.0
-          
-          # 1. Budowanie projektu w wersji 'release'
           cargo build --release --target xtensa-esp32s3-none-elf
-          
-          # 2. Generowanie scalonego pliku .bin (zawiera program + bootloader)
-          # Adres docelowy: ../merged.bin (wyjdzie o jeden folder wyżej niż /core)
           /home/runner/.cargo/bin/espflash save-image --chip esp32s3 target/xtensa-esp32s3-none-elf/release/spool-ease ../merged.bin
 
       - name: Upload Artifact
-* uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4
         with:
           name: SpoolEase-Polski-Final
           path: merged.bin
