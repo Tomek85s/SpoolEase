@@ -1,1 +1,32 @@
+name: Build SpoolEase
+on: [push, pull_request]
 
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev cmake gcc-riscv64-unknown-elf libssl-dev pkg-config libuv1-dev
+
+      - name: Setup ESP Rust
+        uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: true
+
+      - name: Build Firmware
+        # Wchodzimy do folderu core i tam budujemy
+        working-directory: ./core
+        run: cargo build --release --target xtensa-esp32s3-none-elf
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spool-ease-bin
+          # Ścieżka relatywna do głównego folderu
+          path: core/target/xtensa-esp32s3-none-elf/release/
