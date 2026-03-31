@@ -1,0 +1,25 @@
+name: Build SpoolEase
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imc-unknown-none-elf, xtensa-esp32s3-none-elf
+          
+      - name: Install espflash
+        run: cargo install espflash --no-default-features --features cli
+
+      - name: Build Firmware
+        run: cargo build --release --target xtensa-esp32s3-none-elf
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: spool-ease-bin
+          path: target/xtensa-esp32s3-none-elf/release/spool-ease # Sprawdź dokładną nazwę binarki w Cargo.toml
