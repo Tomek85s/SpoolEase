@@ -19,9 +19,6 @@ jobs:
           buildtargets: esp32s3
           ldproxy: true
 
-      - name: Install espflash
-        run: cargo install espflash --no-default-features --features cli
-
       - name: Build Firmware
         run: cargo build --release --target xtensa-esp32s3-none-elf
 
